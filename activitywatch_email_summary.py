@@ -3,13 +3,13 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import logging
 import os
 import re
 import smtplib
 import sys
 import tempfile
 import time
-import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -33,7 +33,9 @@ import matplotlib.pyplot as plt
 
 CONFIG_FILE = Path("config.json")
 DEFAULT_CONFIG_EXAMPLE_FILE = Path("config.example.json")
-SENT_LOG_FILE = Path.home() / ".aw_sent_log.json"
+APP_RUNTIME_DIR = Path(__file__).resolve().parent / ".aw_email_summary"
+SENT_LOG_FILE = APP_RUNTIME_DIR / "sent_log.json"
+APP_LOG_FILE = APP_RUNTIME_DIR / "activitywatch_email_summary.log"
 DEFAULT_API_BASE_URL = "http://localhost:5600"
 DEFAULT_TIMEZONE = "Europe/Berlin"
 DEFAULT_LOOKBACK_DAYS = 30
@@ -103,16 +105,21 @@ class ReportData:
     events_found: int
 
 
+LOGGER = logging.getLogger("activitywatch_email_summary")
+
+
 def main() -> int:
+    setup_logging()
     args = parse_args()
     try:
         config = load_config(CONFIG_FILE)
     except Exception as exc:
-        print(f"Fehler beim Laden der Konfiguration: {exc}", file=sys.stderr)
+        LOGGER.error("Fehler beim Laden der Konfiguration: %s", exc)
         if not CONFIG_FILE.exists():
-            print(
-                f"Lege {CONFIG_FILE} an, indem du {DEFAULT_CONFIG_EXAMPLE_FILE} kopierst und ausfüllst.",
-                file=sys.stderr,
+            LOGGER.error(
+                "Lege %s an, indem du %s kopierst und ausfüllst.",
+                CONFIG_FILE,
+                DEFAULT_CONFIG_EXAMPLE_FILE,
             )
         return 1
 
@@ -125,13 +132,13 @@ def main() -> int:
     try:
         sent_log = load_sent_log(SENT_LOG_FILE)
     except Exception as exc:
-        print(f"Fehler beim Laden des lokalen Sent-Logs: {exc}", file=sys.stderr)
+        LOGGER.error("Fehler beim Laden des lokalen Sent-Logs: %s", exc)
         return 1
 
     try:
         bucket_catalog = discover_buckets(config.aw_api_base_url)
     except Exception as exc:
-        print(f"ActivityWatch-API nicht erreichbar oder nicht lesbar: {exc}", file=sys.stderr)
+        LOGGER.error("ActivityWatch-API nicht erreichbar oder nicht lesbar: %s", exc)
         return 1
 
     processed_any = False
@@ -171,16 +178,12 @@ def main() -> int:
                 try:
                     save_sent_log_atomic(SENT_LOG_FILE, sent_log)
                 except Exception as log_exc:
-                    print(f"Sent-Log konnte nach Fehler nicht geschrieben werden: {log_exc}", file=sys.stderr)
-                print(
-                    f"Fehler bei {period.timeframe} {period.label}: {exc}",
-                    file=sys.stderr,
-                )
-                print(traceback.format_exc(), file=sys.stderr)
+                    LOGGER.error("Sent-Log konnte nach Fehler nicht geschrieben werden: %s", log_exc)
+                LOGGER.exception("Fehler bei %s %s: %s", period.timeframe, period.label, exc)
                 continue
 
     if not processed_any:
-        print("Keine neuen Berichte zu versenden.")
+        LOGGER.info("Keine neuen Berichte zu versenden.")
 
     return 0
 
@@ -268,6 +271,25 @@ def normalize_timeframe(value: str) -> str:
 def normalize_path_segment(value: Any) -> str:
     text = str(value).strip()
     return text if text else "Uncategorized"
+
+
+def setup_logging() -> None:
+    APP_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.propagate = False
+    LOGGER.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    file_handler = logging.FileHandler(APP_LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(formatter)
+
+    LOGGER.addHandler(file_handler)
+    LOGGER.addHandler(stream_handler)
 
 
 def load_sent_log(path: Path) -> dict[str, Any]:

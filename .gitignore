@@ -1,4 +1,5 @@
 config.json
-.aw_sent_log.json
+.aw_email_summary/
 *.png
 __pycache__/
+.agents

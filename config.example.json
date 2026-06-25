@@ -1,0 +1,36 @@
+{
+  "enabled_timeframes": ["daily", "weekly", "yearly"],
+  "top_items_limit": 5,
+  "lookback_days": 30,
+  "aw_api_base_url": "http://localhost:5600",
+  "timezone": "Europe/Berlin",
+  "default_category_path": ["Uncategorized"],
+  "category_rules": [
+    {
+      "path": ["Work", "Programming"],
+      "match": {
+        "app_patterns": ["DEIN_APP_REGEX"],
+        "title_patterns": ["DEIN_TITEL_REGEX"],
+        "bucket_patterns": ["DEIN_BUCKET_REGEX"]
+      }
+    },
+    {
+      "path": ["Sport & Health", "Nutrition"],
+      "match": {
+        "app_patterns": ["DEIN_APP_REGEX"],
+        "title_patterns": ["DEIN_TITEL_REGEX"],
+        "bucket_patterns": ["DEIN_BUCKET_REGEX"]
+      }
+    }
+  ],
+  "smtp_settings": {
+    "server": "smtp.gmail.com",
+    "port": 587,
+    "sender_email": "DEINE_ABSENDER_EMAIL",
+    "recipient_email": "DEINE_EMPFÄNGER_EMAIL",
+    "username": "DEIN_SMTP_BENUTZERNAME",
+    "password": "DEIN_APP_PASSWORT",
+    "use_tls": true,
+    "use_ssl": false
+  }
+}

@@ -1,0 +1,4 @@
+config.json
+.aw_sent_log.json
+*.png
+__pycache__/

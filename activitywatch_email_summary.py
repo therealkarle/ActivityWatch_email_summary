@@ -768,28 +768,65 @@ def top_n_items(values: dict[str, float], limit: int) -> list[tuple[str, float]]
 
 
 def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> Figure:
-    fig, ax = plt.subplots(figsize=(10, max(3, 0.45 * max(1, len(items)) + 1)))
+    fig, ax = plt.subplots(figsize=(7.0, max(2.6, 0.75 * max(1, len(items)) + 0.9)))
     if not items:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=12)
         ax.set_axis_off()
         return fig
 
-    labels = [label[:60] for label, _ in items]
+    labels = [label[:48] for label, _ in items]
     values = [seconds_to_hours(seconds) for _, seconds in items]
     y_pos = list(range(len(items)))
-    ax.barh(y_pos, values, color="#2f6fed")
-    ax.set_yticks(y_pos, labels)
+    palette = [
+        "#bfbfbf",
+        "#67d0ff",
+        "#0b72c6",
+        "#bbe500",
+        "#80d8ff",
+        "#f7a600",
+        "#7e57c2",
+        "#4caf50",
+    ]
+    colors = [palette[idx % len(palette)] for idx in range(len(items))]
+    ax.barh(y_pos, values, color=colors, height=0.88, edgecolor="none")
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels([""] * len(items))
     ax.invert_yaxis()
-    ax.set_xlabel("Stunden")
-    ax.set_title(title)
+    max_value = max(values) or 1.0
+    ax.set_xlim(0, max_value * 1.18)
+    ax.set_title(title, loc="left", fontsize=14, pad=10)
+    ax.tick_params(axis="x", bottom=False, labelbottom=False)
+    ax.tick_params(axis="y", left=False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    x_offset = max_value * 0.02
     for idx, value in enumerate(values):
-        ax.text(value + max(values) * 0.01 + 0.02, idx, f"{value:.2f}", va="center", fontsize=9)
+        ax.text(
+            x_offset,
+            idx - 0.14,
+            labels[idx],
+            va="center",
+            ha="left",
+            fontsize=10.5,
+            color="#1f2937",
+            clip_on=True,
+        )
+        ax.text(
+            x_offset,
+            idx + 0.17,
+            format_duration_compact(items[idx][1]),
+            va="center",
+            ha="left",
+            fontsize=8.3,
+            color="#1f2937",
+            clip_on=True,
+        )
     fig.tight_layout()
     return fig
 
 
 def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figure:
-    fig, ax = plt.subplots(figsize=(9, 9))
+    fig, ax = plt.subplots(figsize=(7.2, 7.2))
     if not category_seconds:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=14)
         ax.set_axis_off()
@@ -820,6 +857,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         autopct=lambda pct: f"{pct:.1f}%" if pct >= 8 else "",
         startangle=90,
         colors=inner_colors,
+        textprops={"fontsize": 8},
     )
     ax.pie(
         outer_sizes,
@@ -829,14 +867,14 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         wedgeprops=dict(width=0.28, edgecolor="white"),
         startangle=90,
         colors=outer_colors,
-        textprops={"fontsize": 8},
+        textprops={"fontsize": 7.5},
     )
-    ax.set_title("ActivityWatch Categories")
+    ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
     return fig
 
 
 def create_timeline_plot(report: ReportData, top_items_limit: int, week_start_day: int = 0) -> Figure:
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, ax = plt.subplots(figsize=(7.4, 5.8))
     if not report.timeline_seconds:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=12)
         ax.set_axis_off()
@@ -873,14 +911,23 @@ def create_timeline_plot(report: ReportData, top_items_limit: int, week_start_da
                 )
             else:
                 height = bucket_values.get(category, 0.0)
-            heights.append(seconds_to_hours(height))
-        ax.bar(buckets, heights, bottom=bottom, color=cmap(idx % 20), label=category)
+            heights.append(height / 60.0)
+        ax.bar(buckets, heights, bottom=bottom, color=cmap(idx % 20), width=0.8, label=category)
         bottom = [b + h for b, h in zip(bottom, heights)]
 
-    ax.set_ylabel("Stunden")
-    ax.set_title("Timeline by Category")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
-    ax.tick_params(axis="x", rotation=45)
+    ax.set_ylabel("")
+    ax.set_title("Timeline (barchart)", loc="left", fontsize=15, pad=12)
+    ax.grid(True, axis="both", linestyle="-", color="#d7d7d7", alpha=0.8)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.tick_params(axis="x", rotation=45, labelsize=9)
+    ax.tick_params(axis="y", labelsize=9)
+    if len(buckets) > 1:
+        step = 2 if report.period.timeframe == "daily" else max(1, len(buckets) // 8)
+        tick_positions = list(range(0, len(buckets), step))
+        ax.set_xticks(tick_positions, [buckets[i] for i in tick_positions])
+    ax.set_yticks([0, 15, 30, 45, 60, 75], ["0", "15m", "30m", "45m", "1h", "1.25h"])
     fig.tight_layout()
     return fig
 
@@ -907,28 +954,16 @@ def seconds_to_hours(seconds: float) -> float:
     return seconds / 3600.0
 
 
-def build_html_email(config: AppConfig, report: ReportData, images: list[tuple[str, bytes]]) -> str:
+def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[str, bytes]]) -> str:
     total_time = format_seconds(report.total_seconds)
     category_tree_html = build_category_tree_html(report.category_seconds)
-    top_apps_html = build_simple_table(report.app_seconds, config.top_items_limit, "Application")
-    top_titles_html = build_simple_table(report.title_seconds, config.top_items_limit, "Window Title")
-
-    image_html = []
-    for cid, _ in images:
-        title = {
-            "top-apps": "Top Applications",
-            "top-titles": "Top Window Titles",
-            "category": "ActivityWatch Categories",
-            "timeline": "Timeline",
-        }.get(cid, cid)
-        image_html.append(
-            f"""
-            <section class="card">
-              <h2>{escape_html(title)}</h2>
-              <img src="cid:{cid}" alt="{escape_html(title)}" />
-            </section>
-            """
-        )
+    top_categories_html = build_bar_list_html(
+        report.category_seconds,
+        config.top_items_limit,
+        item_formatter=lambda path: " > ".join(path),
+    )
+    top_apps_more_html = '<div class="show-more">⌄⌄ Show more</div>' if len(report.app_seconds) > config.top_items_limit else ""
+    top_titles_more_html = '<div class="show-more">⌄⌄ Show more</div>' if len(report.title_seconds) > config.top_items_limit else ""
 
     html = f"""
     <html>
@@ -937,86 +972,209 @@ def build_html_email(config: AppConfig, report: ReportData, images: list[tuple[s
         <style>
           body {{
             font-family: Arial, sans-serif;
-            color: #1f2937;
-            line-height: 1.5;
+            color: #243041;
+            line-height: 1.45;
+            background: #ffffff;
           }}
           .wrap {{
-            max-width: 1100px;
+            max-width: 1180px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 16px 18px 28px;
+          }}
+          .header {{
+            margin-bottom: 14px;
+          }}
+          .header h1 {{
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
           }}
           .summary {{
-            background: #f3f4f6;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 20px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+            color: #5b6574;
+            font-size: 13px;
           }}
           .card {{
-            margin: 24px 0;
-            padding: 16px;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
             background: #fff;
+            border: 1px solid #e6e8ee;
+            border-radius: 10px;
+            padding: 12px 12px 14px;
+            box-sizing: border-box;
+            overflow: hidden;
           }}
-          table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin: 12px 0 0;
+          .card h2 {{
+            margin: 0 0 10px;
+            font-size: 20px;
+            font-weight: 500;
+            color: #243041;
           }}
-          th, td {{
-            border: 1px solid #e5e7eb;
-            padding: 8px 10px;
-            text-align: left;
-            vertical-align: top;
+          .dashboard-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px 18px;
+            align-items: start;
           }}
-          th {{
-            background: #f9fafb;
+          .dashboard-grid .card img {{
+            margin-top: 0;
           }}
-          ul {{
-            margin: 8px 0 8px 22px;
+          .metric-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          }}
+          .metric-item {{
+            --bar-color: #87cefa;
+            --bar-width: 100%;
+            width: var(--bar-width);
+            min-width: 120px;
+            background: var(--bar-color);
+            border-radius: 5px;
+            padding: 6px 7px 5px;
+            color: #20252d;
+            box-sizing: border-box;
+            box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+          }}
+          .metric-label {{
+            font-size: 14px;
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }}
+          .metric-duration {{
+            font-size: 11px;
+            margin-top: 2px;
+          }}
+          .show-more {{
+            margin-top: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid #97a2b4;
+            border-radius: 4px;
+            padding: 4px 10px;
+            color: #4a5a72;
+            background: #fff;
+            font-size: 13px;
+            width: fit-content;
+          }}
+          .muted {{
+            color: #6b7280;
+          }}
+          .tree-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+          }}
+          .tree-entry {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+            padding-left: calc(var(--depth, 0) * 16px);
+          }}
+          .tree-main {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            min-width: 0;
+          }}
+          .tree-marker {{
+            color: #7a8493;
+            font-size: 13px;
+            line-height: 1;
+            flex: 0 0 auto;
+          }}
+          .tree-name {{
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }}
+          .tree-duration {{
+            color: #4a5568;
+            white-space: nowrap;
+            margin-left: 12px;
+            flex: 0 0 auto;
+          }}
+          .tree-percent {{
+            margin-left: 8px;
+            color: #7a8493;
+            font-size: 12px;
+          }}
+          .tree-footnote {{
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e6e8ee;
+          }}
+          .checkbox {{
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 13px;
+            color: #4a5568;
           }}
           img {{
             max-width: 100%;
             height: auto;
             display: block;
-            margin-top: 12px;
           }}
-          .muted {{
-            color: #6b7280;
+          @media (max-width: 1080px) {{
+            .dashboard-grid {{
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }}
           }}
-          .columns {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 16px;
+          @media (max-width: 720px) {{
+            .dashboard-grid {{
+              grid-template-columns: 1fr;
+            }}
           }}
         </style>
       </head>
       <body>
         <div class="wrap">
-          <h1>ActivityWatch {escape_html(report.period.timeframe.title())} Report</h1>
-          <div class="summary">
-            <div><strong>Zeitraum:</strong> {escape_html(report.period.label)}</div>
-            <div><strong>Gesamtzeit:</strong> {escape_html(total_time)}</div>
-            <div><strong>Gefundene Events:</strong> {report.events_found}</div>
+          <div class="header">
+            <h1>ActivityWatch {escape_html(report.period.timeframe.title())} Report</h1>
+            <div class="summary">
+              <div><strong>Zeitraum:</strong> {escape_html(report.period.label)}</div>
+              <div><strong>Gesamtzeit:</strong> {escape_html(total_time)}</div>
+              <div><strong>Gefundene Events:</strong> {report.events_found}</div>
+            </div>
           </div>
 
-          <section class="card">
-            <h2>ActivityWatch-Kategorien</h2>
-            {category_tree_html}
-          </section>
-
-          <div class="columns">
+          <div class="dashboard-grid">
             <section class="card">
               <h2>Top Applications</h2>
-              {top_apps_html}
+              <img src="cid:top-apps" alt="Top Applications" />
+              {top_apps_more_html}
             </section>
             <section class="card">
               <h2>Top Window Titles</h2>
-              {top_titles_html}
+              <img src="cid:top-titles" alt="Top Window Titles" />
+              {top_titles_more_html}
+            </section>
+            <section class="card">
+              <h2>Timeline (barchart)</h2>
+              <img src="cid:timeline" alt="Timeline" />
+            </section>
+            <section class="card">
+              <h2>Top Categories</h2>
+              {top_categories_html}
+            </section>
+            <section class="card">
+              <h2>Category Tree</h2>
+              {category_tree_html}
+              <div class="tree-footnote">
+                <label class="checkbox"><input type="checkbox" /> Show percent</label>
+              </div>
+            </section>
+            <section class="card">
+              <h2>Category Sunburst</h2>
+              <img src="cid:category" alt="Category Sunburst" />
             </section>
           </div>
-
-          {''.join(image_html)}
         </div>
       </body>
     </html>
@@ -1034,26 +1192,41 @@ def escape_html(value: str) -> str:
     )
 
 
-def build_simple_table(values: dict[str, float], limit: int, label_name: str) -> str:
+def build_bar_list_html(
+    values: dict[Any, float],
+    limit: int,
+    item_formatter: Any | None = None,
+) -> str:
     rows = top_n_items(values, limit)
     if not rows:
         return "<p class='muted'>Keine Daten</p>"
-    total = sum(values.values()) or 1.0
-    html_rows = []
+    max_seconds = max((seconds for _, seconds in rows), default=1.0) or 1.0
+    palette = [
+        "#67d0ff",
+        "#bfc0c0",
+        "#0b72c6",
+        "#bbe500",
+        "#ffb000",
+        "#80d8ff",
+        "#6fcf97",
+        "#b39ddb",
+    ]
+    html_rows = ['<div class="metric-list">']
     for label, seconds in rows:
+        rendered_label = item_formatter(label) if item_formatter else label
+        width = max(16.0, seconds / max_seconds * 100.0)
+        color = palette[len(html_rows) % len(palette)]
         html_rows.append(
-            f"<tr><td>{escape_html(label)}</td><td>{format_seconds(seconds)}</td><td>{seconds / total * 100:.1f}%</td></tr>"
+            "<div class=\"metric-item\" "
+            f"style=\"--bar-width: {width:.1f}%; --bar-color: {color};\">"
+            f"<div class=\"metric-label\">{escape_html(str(rendered_label))}</div>"
+            f"<div class=\"metric-duration\">{escape_html(format_duration_compact(seconds))}</div>"
+            "</div>"
         )
-    return f"""
-    <table>
-      <thead>
-        <tr><th>{escape_html(label_name)}</th><th>Time</th><th>%</th></tr>
-      </thead>
-      <tbody>
-        {''.join(html_rows)}
-      </tbody>
-    </table>
-    """
+    if len(rows) < len(values):
+        html_rows.append('<div class="show-more">⌄⌄ Show more</div>')
+    html_rows.append("</div>")
+    return "".join(html_rows)
 
 
 def build_category_tree_html(category_seconds: dict[tuple[str, ...], float]) -> str:
@@ -1073,22 +1246,38 @@ def build_category_tree_html(category_seconds: dict[tuple[str, ...], float]) -> 
 
     total_seconds = sum(category_seconds.values()) or 1.0
 
-    def render_node(node: dict[str, Any], prefix: tuple[str, ...]) -> str:
+    def render_node(node: dict[str, Any], prefix: tuple[str, ...], depth: int = 0) -> str:
         items = []
         for name in sorted(node.keys()):
             current_path = prefix + (name,)
             seconds = totals.get(current_path, 0.0)
             percent = seconds / total_seconds * 100
             children = node[name]
-            children_html = render_node(children, current_path) if children else ""
+            children_html = render_node(children, current_path, depth + 1) if children else ""
             items.append(
-                f"<li><strong>{escape_html(name)}</strong> - {format_seconds(seconds)} ({percent:.1f}%)"
-                + (f"{children_html}" if children_html else "")
-                + "</li>"
+                f'<div class="tree-entry" style="--depth: {depth};">'
+                f'<div class="tree-main"><span class="tree-marker">⊞</span><span class="tree-name">{escape_html(name)}</span></div>'
+                f'<div class="tree-duration">{escape_html(format_duration_compact(seconds))}</div>'
+                f'<span class="tree-percent">{percent:.1f}%</span>'
+                f"</div>"
+                f"{children_html}"
             )
-        return f"<ul>{''.join(items)}</ul>" if items else ""
+        return f'<div class="tree-list">{"" .join(items)}</div>' if items else ""
 
     return render_node(tree, ())
+
+
+def format_duration_compact(seconds: float) -> str:
+    total = int(round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
 
 
 def format_seconds(seconds: float) -> str:

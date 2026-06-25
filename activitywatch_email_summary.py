@@ -27,6 +27,7 @@ from zoneinfo import ZoneInfo
 import matplotlib
 
 matplotlib.use("Agg")
+from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
 
@@ -315,17 +316,17 @@ def mark_period_logged(
 ) -> None:
     reports = sent_log.setdefault("reports", {})
     by_timeframe = reports.setdefault(period.timeframe, {})
-        by_timeframe[period.key] = {
-            "timeframe": period.timeframe,
-            "label": period.label,
-            "start": period.start.isoformat(),
-            "end": period.end.isoformat(),
-            "completed": completed,
-            "has_data": has_data,
-            "sent": sent,
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
-            "error": error,
-        }
+    by_timeframe[period.key] = {
+        "timeframe": period.timeframe,
+        "label": period.label,
+        "start": period.start.isoformat(),
+        "end": period.end.isoformat(),
+        "completed": completed,
+        "has_data": has_data,
+        "sent": sent,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "error": error,
+    }
 
 
 def enumerate_periods(timeframe: str, start: datetime, end: datetime, tz: ZoneInfo) -> list[ReportPeriod]:
@@ -653,7 +654,7 @@ def top_n_items(values: dict[str, float], limit: int) -> list[tuple[str, float]]
     return sorted(values.items(), key=lambda item: item[1], reverse=True)[:limit]
 
 
-def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> plt.Figure:
+def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> Figure:
     fig, ax = plt.subplots(figsize=(10, max(3, 0.45 * max(1, len(items)) + 1)))
     if not items:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=12)
@@ -674,7 +675,7 @@ def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> p
     return fig
 
 
-def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> plt.Figure:
+def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figure:
     fig, ax = plt.subplots(figsize=(9, 9))
     if not category_seconds:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=14)
@@ -685,7 +686,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> plt.
     inner_totals: dict[str, float] = defaultdict(float)
     outer_labels: list[str] = []
     outer_sizes: list[float] = []
-    outer_colors: list[str] = []
+    outer_colors: list[tuple[float, float, float, float]] = []
     palette = plt.get_cmap("tab20")
 
     for index, (path, seconds) in enumerate(leaf_items):
@@ -721,7 +722,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> plt.
     return fig
 
 
-def create_timeline_plot(report: ReportData, top_items_limit: int) -> plt.Figure:
+def create_timeline_plot(report: ReportData, top_items_limit: int) -> Figure:
     fig, ax = plt.subplots(figsize=(12, 5))
     if not report.timeline_seconds:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=12)

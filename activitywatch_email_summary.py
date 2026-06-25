@@ -9,10 +9,10 @@ import re
 import smtplib
 import sys
 import tempfile
-import time
+import time as time_module
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from email import encoders
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
@@ -40,11 +40,21 @@ DEFAULT_API_BASE_URL = "http://localhost:5600"
 DEFAULT_TIMEZONE = "Europe/Berlin"
 DEFAULT_LOOKBACK_DAYS = 30
 DEFAULT_TOP_ITEMS_LIMIT = 5
-SUPPORTED_TIMEFRAMES = {"daily", "weekly", "yearly"}
+DEFAULT_WEEK_START_DAY = "mon"
+SUPPORTED_TIMEFRAMES = {"daily", "weekly", "monthly", "yearly"}
 WINDOW_BUCKET_HINTS = ("aw-watcher-window", "window")
 AFK_BUCKET_HINTS = ("aw-watcher-afk", "afk")
 WEEKDAY_BUCKETS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MONTH_BUCKETS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+WEEK_START_DAYS = {
+    "mon": 0,
+    "tue": 1,
+    "wed": 2,
+    "thu": 3,
+    "fri": 4,
+    "sat": 5,
+    "sun": 6,
+}
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,7 @@ class AppConfig:
     enabled_timeframes: tuple[str, ...]
     top_items_limit: int
     lookback_days: int
+    week_start_day: int
     aw_api_base_url: str
     timezone: ZoneInfo
     smtp_settings: SMTPSettings
@@ -127,12 +138,21 @@ def main() -> int:
         # Default behaviour: one boot-time run. The flag exists mainly for testability.
         pass
 
-    time.sleep(15)
+    time_module.sleep(15)
 
     try:
         sent_log = load_sent_log(SENT_LOG_FILE)
     except Exception as exc:
         LOGGER.error("Fehler beim Laden des lokalen Sent-Logs: %s", exc)
+        return 1
+
+    now = datetime.now(config.timezone)
+    try:
+        first_run_date, sent_log_updated = ensure_first_run_date(sent_log, now, config.timezone)
+        if sent_log_updated:
+            save_sent_log_atomic(SENT_LOG_FILE, sent_log)
+    except Exception as exc:
+        LOGGER.error("Fehler beim Initialisieren des Erststart-Cutoffs: %s", exc)
         return 1
 
     try:
@@ -142,11 +162,18 @@ def main() -> int:
         return 1
 
     processed_any = False
-    now = datetime.now(config.timezone)
     lookback_start = now - timedelta(days=config.lookback_days)
+    first_run_start = datetime.combine(first_run_date, dt_time.min, tzinfo=config.timezone)
+    reporting_start = max(lookback_start, first_run_start)
 
     for timeframe in config.enabled_timeframes:
-        periods = enumerate_periods(timeframe, lookback_start, now, config.timezone)
+        periods = enumerate_periods(
+            timeframe,
+            reporting_start,
+            now,
+            config.timezone,
+            config.week_start_day,
+        )
         for period in periods:
             if is_period_logged(sent_log, period):
                 continue
@@ -227,6 +254,8 @@ def load_config(path: Path) -> AppConfig:
     if lookback_days < 1:
         raise ValueError("lookback_days muss >= 1 sein.")
 
+    week_start_day = parse_week_start_day(raw.get("week_start_day", DEFAULT_WEEK_START_DAY))
+
     aw_api_base_url = str(raw.get("aw_api_base_url", DEFAULT_API_BASE_URL)).rstrip("/")
     timezone_name = str(raw.get("timezone", DEFAULT_TIMEZONE))
     try:
@@ -240,6 +269,7 @@ def load_config(path: Path) -> AppConfig:
         enabled_timeframes=enabled_timeframes,
         top_items_limit=top_items_limit,
         lookback_days=lookback_days,
+        week_start_day=week_start_day,
         aw_api_base_url=aw_api_base_url,
         timezone=tz,
         smtp_settings=smtp_settings,
@@ -266,6 +296,27 @@ def parse_smtp_settings(raw: dict[str, Any]) -> SMTPSettings:
 
 def normalize_timeframe(value: str) -> str:
     return str(value).strip().lower()
+
+
+def parse_week_start_day(value: Any) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        if 0 <= value <= 6:
+            return value
+        raise ValueError("week_start_day muss zwischen 0 und 6 liegen.")
+
+    normalized = str(value).strip().lower()
+    if normalized.isdigit():
+        numeric = int(normalized)
+        if 0 <= numeric <= 6:
+            return numeric
+        raise ValueError("week_start_day muss zwischen 0 und 6 liegen.")
+
+    if normalized in WEEK_START_DAYS:
+        return WEEK_START_DAYS[normalized]
+
+    raise ValueError(
+        "week_start_day muss einer von mon, tue, wed, thu, fri, sat, sun oder eine Zahl 0-6 sein."
+    )
 
 
 def normalize_path_segment(value: Any) -> str:
@@ -296,9 +347,27 @@ def load_sent_log(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"reports": {}}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {"reports": {}}
+    if not isinstance(data, dict):
+        return {"reports": {}}
+    if not isinstance(data.get("reports"), dict):
+        data["reports"] = {}
+    return data
+
+
+def ensure_first_run_date(sent_log: dict[str, Any], now: datetime, tz: ZoneInfo) -> tuple[date, bool]:
+    raw_value = sent_log.get("first_run_date")
+    if isinstance(raw_value, str):
+        try:
+            return date.fromisoformat(raw_value), False
+        except ValueError:
+            pass
+
+    first_run_date = now.astimezone(tz).date()
+    sent_log["first_run_date"] = first_run_date.isoformat()
+    return first_run_date, True
 
 
 def save_sent_log_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -351,10 +420,16 @@ def mark_period_logged(
     }
 
 
-def enumerate_periods(timeframe: str, start: datetime, end: datetime, tz: ZoneInfo) -> list[ReportPeriod]:
+def enumerate_periods(
+    timeframe: str,
+    start: datetime,
+    end: datetime,
+    tz: ZoneInfo,
+    week_start_day: int = 0,
+) -> list[ReportPeriod]:
     timeframe = normalize_timeframe(timeframe)
     periods: list[ReportPeriod] = []
-    current_start = align_start_to_timeframe(start, timeframe, tz)
+    current_start = align_start_to_timeframe(start, timeframe, tz, week_start_day)
     while current_start < end:
         current_end = add_timeframe(current_start, timeframe, tz)
         if current_end <= start:
@@ -362,7 +437,7 @@ def enumerate_periods(timeframe: str, start: datetime, end: datetime, tz: ZoneIn
             continue
         clipped_start = max(current_start, start)
         clipped_end = min(current_end, end)
-        key, label = build_period_metadata(clipped_start, timeframe, tz)
+        key, label = build_period_metadata(current_start, timeframe, tz)
         periods.append(
             ReportPeriod(
                 timeframe=timeframe,
@@ -376,13 +451,21 @@ def enumerate_periods(timeframe: str, start: datetime, end: datetime, tz: ZoneIn
     return periods
 
 
-def align_start_to_timeframe(value: datetime, timeframe: str, tz: ZoneInfo) -> datetime:
+def align_start_to_timeframe(
+    value: datetime,
+    timeframe: str,
+    tz: ZoneInfo,
+    week_start_day: int = 0,
+) -> datetime:
     localized = value.astimezone(tz)
     if timeframe == "daily":
         return localized.replace(hour=0, minute=0, second=0, microsecond=0)
     if timeframe == "weekly":
         start_of_day = localized.replace(hour=0, minute=0, second=0, microsecond=0)
-        return start_of_day - timedelta(days=start_of_day.weekday())
+        offset = (start_of_day.weekday() - week_start_day) % 7
+        return start_of_day - timedelta(days=offset)
+    if timeframe == "monthly":
+        return localized.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     if timeframe == "yearly":
         return localized.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     raise ValueError(f"Unsupported timeframe: {timeframe}")
@@ -393,6 +476,10 @@ def add_timeframe(start: datetime, timeframe: str, tz: ZoneInfo) -> datetime:
         return start + timedelta(days=1)
     if timeframe == "weekly":
         return start + timedelta(days=7)
+    if timeframe == "monthly":
+        year = start.year + (1 if start.month == 12 else 0)
+        month = 1 if start.month == 12 else start.month + 1
+        return start.replace(year=year, month=month, day=1)
     if timeframe == "yearly":
         return start.replace(year=start.year + 1)
     raise ValueError(f"Unsupported timeframe: {timeframe}")
@@ -403,8 +490,10 @@ def build_period_metadata(start: datetime, timeframe: str, tz: ZoneInfo) -> tupl
     if timeframe == "daily":
         return localized.date().isoformat(), localized.strftime("%Y-%m-%d")
     if timeframe == "weekly":
-        iso_year, iso_week, _ = localized.isocalendar()
-        key = f"{iso_year}-W{iso_week:02d}"
+        key = localized.date().isoformat()
+        return key, key
+    if timeframe == "monthly":
+        key = localized.strftime("%Y-%m")
         return key, key
     if timeframe == "yearly":
         return str(localized.year), str(localized.year)
@@ -626,6 +715,8 @@ def get_timeline_bucket(period: ReportPeriod, moment: datetime, tz: ZoneInfo) ->
         return f"{localized.hour:02d}:00"
     if period.timeframe == "weekly":
         return WEEKDAY_BUCKETS[localized.weekday()]
+    if period.timeframe == "monthly":
+        return f"{localized.day:02d}"
     if period.timeframe == "yearly":
         return MONTH_BUCKETS[localized.month - 1]
     return localized.strftime("%Y-%m-%d")
@@ -644,7 +735,7 @@ def generate_report_images(config: AppConfig, report: ReportData) -> list[tuple[
         top_apps = top_n_items(report.app_seconds, config.top_items_limit)
         top_titles = top_n_items(report.title_seconds, config.top_items_limit)
         category_plot = create_category_plot(report.category_seconds)
-        timeline_plot = create_timeline_plot(report, config.top_items_limit)
+        timeline_plot = create_timeline_plot(report, config.top_items_limit, config.week_start_day)
         app_plot = create_horizontal_bar_chart(top_apps, "Top Applications")
         title_plot = create_horizontal_bar_chart(top_titles, "Top Window Titles")
 
@@ -744,14 +835,14 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
     return fig
 
 
-def create_timeline_plot(report: ReportData, top_items_limit: int) -> Figure:
+def create_timeline_plot(report: ReportData, top_items_limit: int, week_start_day: int = 0) -> Figure:
     fig, ax = plt.subplots(figsize=(12, 5))
     if not report.timeline_seconds:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=12)
         ax.set_axis_off()
         return fig
 
-    buckets = ordered_timeline_buckets(report.period.timeframe)
+    buckets = ordered_timeline_buckets(report.period.timeframe, week_start_day)
     category_names = sorted(
         {
             category
@@ -794,14 +885,22 @@ def create_timeline_plot(report: ReportData, top_items_limit: int) -> Figure:
     return fig
 
 
-def ordered_timeline_buckets(timeframe: str) -> list[str]:
+def ordered_timeline_buckets(timeframe: str, week_start_day: int = 0) -> list[str]:
     if timeframe == "daily":
         return [f"{hour:02d}:00" for hour in range(24)]
     if timeframe == "weekly":
-        return WEEKDAY_BUCKETS
+        return ordered_weekday_buckets(week_start_day)
+    if timeframe == "monthly":
+        return [f"{day:02d}" for day in range(1, 32)]
     if timeframe == "yearly":
         return MONTH_BUCKETS
     return []
+
+
+def ordered_weekday_buckets(week_start_day: int | str) -> list[str]:
+    if isinstance(week_start_day, str):
+        week_start_day = parse_week_start_day(week_start_day)
+    return WEEKDAY_BUCKETS[week_start_day:] + WEEKDAY_BUCKETS[:week_start_day]
 
 
 def seconds_to_hours(seconds: float) -> float:

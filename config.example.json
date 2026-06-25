@@ -1,7 +1,8 @@
 {
-  "enabled_timeframes": ["daily", "weekly", "yearly"],
+  "enabled_timeframes": ["daily", "weekly", "monthly", "yearly"],
   "top_items_limit": 5,
   "lookback_days": 30,
+  "week_start_day": "mon",
   "aw_api_base_url": "http://localhost:5600",
   "timezone": "Europe/Berlin",
   "smtp_settings": {

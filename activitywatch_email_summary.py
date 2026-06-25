@@ -18,7 +18,7 @@ from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -45,11 +45,10 @@ MONTH_BUCKETS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", 
 
 
 @dataclass(frozen=True)
-class CategoryRule:
-    path: tuple[str, ...]
-    app_patterns: tuple[re.Pattern[str], ...] = ()
-    title_patterns: tuple[re.Pattern[str], ...] = ()
-    bucket_patterns: tuple[re.Pattern[str], ...] = ()
+class BucketCatalog:
+    window_bucket_ids: tuple[str, ...]
+    afk_bucket_ids: tuple[str, ...]
+    category_paths: dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True)
@@ -71,8 +70,6 @@ class AppConfig:
     lookback_days: int
     aw_api_base_url: str
     timezone: ZoneInfo
-    default_category_path: tuple[str, ...]
-    category_rules: tuple[CategoryRule, ...]
     smtp_settings: SMTPSettings
 
 
@@ -131,7 +128,7 @@ def main() -> int:
         return 1
 
     try:
-        bucket_index = discover_buckets(config.aw_api_base_url)
+        bucket_catalog = discover_buckets(config.aw_api_base_url)
     except Exception as exc:
         print(f"ActivityWatch-API nicht erreichbar oder nicht lesbar: {exc}", file=sys.stderr)
         return 1
@@ -147,7 +144,7 @@ def main() -> int:
                 continue
 
             try:
-                report = build_report(config, bucket_index, period)
+                report = build_report(config, bucket_catalog, period)
                 if report.total_seconds <= 0:
                     mark_period_logged(sent_log, period, has_data=False, sent=False, completed=True)
                     save_sent_log_atomic(SENT_LOG_FILE, sent_log)
@@ -233,16 +230,6 @@ def load_config(path: Path) -> AppConfig:
     except Exception as exc:
         raise ValueError(f"Ungültige Zeitzone: {timezone_name}") from exc
 
-    default_category_path = tuple(
-        normalize_path_segment(part) for part in raw.get("default_category_path", ["Uncategorized"])
-    )
-    if not default_category_path:
-        default_category_path = ("Uncategorized",)
-
-    category_rules_raw = raw.get("category_rules", [])
-    if not isinstance(category_rules_raw, list):
-        raise ValueError("category_rules muss eine Liste sein.")
-    category_rules = tuple(parse_category_rules(category_rules_raw))
     smtp_settings = parse_smtp_settings(raw.get("smtp_settings", {}))
 
     return AppConfig(
@@ -251,8 +238,6 @@ def load_config(path: Path) -> AppConfig:
         lookback_days=lookback_days,
         aw_api_base_url=aw_api_base_url,
         timezone=tz,
-        default_category_path=default_category_path,
-        category_rules=category_rules,
         smtp_settings=smtp_settings,
     )
 
@@ -273,32 +258,6 @@ def parse_smtp_settings(raw: dict[str, Any]) -> SMTPSettings:
         use_tls=bool(raw.get("use_tls", True)),
         use_ssl=bool(raw.get("use_ssl", False)),
     )
-
-
-def parse_category_rules(raw_rules: list[dict[str, Any]]) -> Iterable[CategoryRule]:
-    for raw_rule in raw_rules:
-        path_raw = raw_rule.get("path")
-        if not path_raw:
-            raise ValueError("Jede category_rules-Regel braucht einen path.")
-        path = tuple(normalize_path_segment(part) for part in path_raw)
-        if not path:
-            raise ValueError("category_rules.path darf nicht leer sein.")
-
-        match = raw_rule.get("match", {})
-        app_patterns = tuple(compile_patterns(match.get("app_patterns", [])))
-        title_patterns = tuple(compile_patterns(match.get("title_patterns", [])))
-        bucket_patterns = tuple(compile_patterns(match.get("bucket_patterns", [])))
-        yield CategoryRule(
-            path=path,
-            app_patterns=app_patterns,
-            title_patterns=title_patterns,
-            bucket_patterns=bucket_patterns,
-        )
-
-
-def compile_patterns(patterns: list[str]) -> Iterable[re.Pattern[str]]:
-    for pattern in patterns:
-        yield re.compile(pattern)
 
 
 def normalize_timeframe(value: str) -> str:
@@ -429,20 +388,26 @@ def build_period_metadata(start: datetime, timeframe: str, tz: ZoneInfo) -> tupl
     raise ValueError(f"Unsupported timeframe: {timeframe}")
 
 
-def discover_buckets(api_base_url: str) -> dict[str, list[str]]:
+def discover_buckets(api_base_url: str) -> BucketCatalog:
     buckets = api_get_json(api_base_url, "/api/0/buckets")
     window_bucket_ids = []
     afk_bucket_ids = []
+    category_paths: dict[str, tuple[str, ...]] = {}
     for bucket_id in buckets.keys():
         if any(hint in bucket_id.lower() for hint in WINDOW_BUCKET_HINTS):
             window_bucket_ids.append(bucket_id)
+            category_paths[bucket_id] = derive_category_path(bucket_id, buckets.get(bucket_id, {}))
         if any(hint in bucket_id.lower() for hint in AFK_BUCKET_HINTS):
             afk_bucket_ids.append(bucket_id)
 
     if not window_bucket_ids:
         raise RuntimeError("Kein ActivityWatch-Window-Bucket gefunden.")
 
-    return {"window": sorted(window_bucket_ids), "afk": sorted(afk_bucket_ids)}
+    return BucketCatalog(
+        window_bucket_ids=tuple(sorted(window_bucket_ids)),
+        afk_bucket_ids=tuple(sorted(afk_bucket_ids)),
+        category_paths=category_paths,
+    )
 
 
 def api_get_json(api_base_url: str, path: str, params: dict[str, Any] | None = None) -> Any:
@@ -459,9 +424,30 @@ def api_get_json(api_base_url: str, path: str, params: dict[str, Any] | None = N
         raise RuntimeError(f"Netzwerkfehler bei {url}: {exc.reason}") from exc
 
 
-def build_report(config: AppConfig, bucket_index: dict[str, list[str]], period: ReportPeriod) -> ReportData:
-    window_events = fetch_window_events(config, bucket_index["window"], period)
-    active_intervals = fetch_active_intervals(config, bucket_index.get("afk", []), period)
+def derive_category_path(bucket_id: str, bucket: dict[str, Any]) -> tuple[str, ...]:
+    raw_value: Any = bucket.get("category")
+    if raw_value is None:
+        data = bucket.get("data", {})
+        if isinstance(data, dict):
+            raw_value = data.get("category")
+    if raw_value is None:
+        raw_value = bucket.get("name") or bucket_id
+
+    if isinstance(raw_value, (list, tuple)):
+        parts = [normalize_path_segment(part) for part in raw_value if str(part).strip()]
+    else:
+        parts = [
+            normalize_path_segment(part)
+            for part in re.split(r"\s*(?:/|>|\\|\|)\s*", str(raw_value))
+            if str(part).strip()
+        ]
+
+    return tuple(parts) if parts else (normalize_path_segment(bucket_id),)
+
+
+def build_report(config: AppConfig, bucket_catalog: BucketCatalog, period: ReportPeriod) -> ReportData:
+    window_events = fetch_window_events(config, list(bucket_catalog.window_bucket_ids), period)
+    active_intervals = fetch_active_intervals(config, list(bucket_catalog.afk_bucket_ids), period)
 
     app_seconds: dict[str, float] = defaultdict(float)
     title_seconds: dict[str, float] = defaultdict(float)
@@ -482,7 +468,7 @@ def build_report(config: AppConfig, bucket_index: dict[str, list[str]], period: 
             continue
         app_key = event.app or "Unknown"
         title_key = event.title or "Unknown"
-        category_path = resolve_category_path(config, event)
+        category_path = resolve_category_path(bucket_catalog, event.bucket_id)
         app_seconds[app_key] += seconds
         title_seconds[title_key] += seconds
         category_seconds[category_path] += seconds
@@ -603,16 +589,8 @@ def merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[da
     return merged
 
 
-def resolve_category_path(config: AppConfig, event: WindowEvent) -> tuple[str, ...]:
-    for rule in config.category_rules:
-        if rule.bucket_patterns and not any(pattern.search(event.bucket_id) for pattern in rule.bucket_patterns):
-            continue
-        if rule.app_patterns and not any(pattern.search(event.app or "") for pattern in rule.app_patterns):
-            continue
-        if rule.title_patterns and not any(pattern.search(event.title or "") for pattern in rule.title_patterns):
-            continue
-        return rule.path
-    return config.default_category_path
+def resolve_category_path(bucket_catalog: BucketCatalog, bucket_id: str) -> tuple[str, ...]:
+    return bucket_catalog.category_paths.get(bucket_id, (normalize_path_segment(bucket_id),))
 
 
 def category_root(path: tuple[str, ...]) -> str:
@@ -739,7 +717,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> plt.
         colors=outer_colors,
         textprops={"fontsize": 8},
     )
-    ax.set_title("Category Distribution")
+    ax.set_title("ActivityWatch Categories")
     return fig
 
 
@@ -818,7 +796,7 @@ def build_html_email(config: AppConfig, report: ReportData, images: list[tuple[s
         title = {
             "top-apps": "Top Applications",
             "top-titles": "Top Window Titles",
-            "category": "Category Distribution",
+            "category": "ActivityWatch Categories",
             "timeline": "Timeline",
         }.get(cid, cid)
         image_html.append(
@@ -901,7 +879,7 @@ def build_html_email(config: AppConfig, report: ReportData, images: list[tuple[s
           </div>
 
           <section class="card">
-            <h2>Hierarchische Kategorien</h2>
+            <h2>ActivityWatch-Kategorien</h2>
             {category_tree_html}
           </section>
 

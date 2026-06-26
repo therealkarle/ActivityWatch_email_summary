@@ -1457,7 +1457,7 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
                 '<div class="category-entry">'
                 f'<div class="category-line" style="padding-left: {len(prefix) * 16}px;">'
                 f'{escape_html(name)} - {escape_html(format_duration_compact(seconds))} - '
-                f'{percent_total:.1f}% gesamt - {percent_parent:.1f}% oberkategorie'
+                f'<em>{percent_total:.1f}% gesamt - {percent_parent:.1f}% oberkategorie</em>'
                 "</div>"
                 f"{child_html}"
                 "</div>"
@@ -1472,7 +1472,7 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
         html.append(
             '<div class="category-root">'
             f'<div class="category-line">{escape_html(root_name)} - {escape_html(format_duration_compact(root_seconds))} - '
-            f'{root_total_percent:.1f}% gesamt</div>'
+            f'<em>{root_total_percent:.1f}% gesamt</em></div>'
             "</div>"
         )
         if root_children:

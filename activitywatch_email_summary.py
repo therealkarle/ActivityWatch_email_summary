@@ -1303,9 +1303,7 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
             display: block;
           }}
           .category-root {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            display: block;
             padding: 8px 0 4px;
             border-top: 1px solid #eef1f5;
           }}
@@ -1313,54 +1311,24 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
             border-top: 0;
             padding-top: 0;
           }}
-          .category-root .tree-name {{
-            font-weight: 700;
-          }}
           .category-sublist {{
             display: block;
             margin: 0 0 8px 18px;
-            padding-left: 12px;
+            padding-left: 10px;
             border-left: 2px solid #eef1f5;
           }}
           .category-entry {{
             display: block;
-            padding: 6px 0 5px 0;
+            padding: 4px 0;
           }}
           .category-line {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            min-width: 0;
-            flex-wrap: nowrap;
-          }}
-          .category-marker {{
-            color: #7a8493;
+            display: block;
             font-size: 13px;
-            line-height: 1.1;
-            flex: 0 0 auto;
-          }}
-          .category-name {{
-            flex: 1 1 auto;
-            font-size: 13px;
-            line-height: 1.1;
+            line-height: 1.35;
+            color: #243041;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-          }}
-          .category-duration {{
-            flex: 0 0 auto;
-            color: #4a5568;
-            margin-top: 0;
-            font-size: 13px;
-            line-height: 1.1;
-            white-space: nowrap;
-          }}
-          .category-percent {{
-            flex: 0 0 auto;
-            color: #7a8493;
-            font-size: 12px;
-            line-height: 1.1;
-            white-space: nowrap;
           }}
           img {{
             max-width: 100%;
@@ -1487,13 +1455,10 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
             child_html = render_node(children, current_path, seconds) if children else ""
             entries.append(
                 '<div class="category-entry">'
-            f'<div class="category-line" style="padding-left: {len(prefix) * 18}px;">'
-            f'<span class="category-marker">•</span>'
-            f'<span class="category-name"> {escape_html( name )}</span>'
-            '<span class="category-separator"> - </span>'
-            f'<span class="category-duration">{escape_html(format_duration_compact(seconds))}</span>'
-            f'<span class="category-percent"> · {percent_total:.1f}% gesamt · {percent_parent:.1f}% oberkategorie</span>'
-            "</div>"
+                f'<div class="category-line" style="padding-left: {len(prefix) * 16}px;">'
+                f'{escape_html(name)} - {escape_html(format_duration_compact(seconds))} - '
+                f'{percent_total:.1f}% gesamt - {percent_parent:.1f}% oberkategorie'
+                "</div>"
                 f"{child_html}"
                 "</div>"
             )
@@ -1506,11 +1471,8 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
         root_total_percent = root_seconds / total_seconds * 100
         html.append(
             '<div class="category-root">'
-            f'<span class="category-marker">•</span>'
-            f'<span class="category-name">{escape_html(root_name)}</span>'
-            '<span class="category-separator"> - </span>'
-            f'<span class="category-duration">{escape_html(format_duration_compact(root_seconds))}</span>'
-            f'<span class="category-percent">{root_total_percent:.1f}% gesamt</span>'
+            f'<div class="category-line">{escape_html(root_name)} - {escape_html(format_duration_compact(root_seconds))} - '
+            f'{root_total_percent:.1f}% gesamt</div>'
             "</div>"
         )
         if root_children:

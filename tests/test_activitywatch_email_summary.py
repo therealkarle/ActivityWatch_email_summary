@@ -244,12 +244,12 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         )
 
         self.assertIn("Work", html)
-        self.assertIn("•", html)
+        self.assertNotIn("•", html)
         self.assertNotIn("⊞", html)
-        self.assertIn("75.0% gesamt", html)
-        self.assertIn("66.7% oberkategorie", html)
-        self.assertIn("33.3% oberkategorie", html)
-        self.assertIn("25.0% gesamt", html)
+        self.assertIn("Work - 1h 30m 0s - 75.0% gesamt", html)
+        self.assertIn("Dev - 1h 0m 0s - 50.0% gesamt - 66.7% oberkategorie", html)
+        self.assertIn("Mail - 30m 0s - 25.0% gesamt - 33.3% oberkategorie", html)
+        self.assertIn("Comms - 30m 0s - 25.0% gesamt", html)
 
     def test_email_layout_is_stacked_and_text_first(self) -> None:
         report = self.build_report()

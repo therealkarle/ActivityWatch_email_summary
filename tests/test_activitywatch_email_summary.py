@@ -234,18 +234,22 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
 
         self.assertEqual(report.category_seconds, {("Uncategorized",): 3600.0})
 
-    def test_top_categories_html_includes_percentages(self) -> None:
-        html = aw.build_bar_list_html(
-            {("Work", "Dev"): 3600.0, ("Comms", "Email"): 1800.0},
-            5,
-            item_formatter=lambda path: " > ".join(path),
-            show_percent=True,
+    def test_category_hierarchy_includes_root_and_child_percentages(self) -> None:
+        html = aw.build_category_hierarchy_html(
+            {
+                ("Work", "Dev"): 3600.0,
+                ("Work", "Mail"): 1800.0,
+                ("Comms", "Email"): 1800.0,
+            }
         )
 
-        self.assertIn("Work &gt; Dev", html)
-        self.assertIn("66.7%", html)
-        self.assertIn("33.3%", html)
-        self.assertNotIn("--bar-width", html)
+        self.assertIn("Work", html)
+        self.assertIn("•", html)
+        self.assertNotIn("⊞", html)
+        self.assertIn("75.0% gesamt", html)
+        self.assertIn("66.7% oberkategorie", html)
+        self.assertIn("33.3% oberkategorie", html)
+        self.assertIn("25.0% gesamt", html)
 
     def test_email_layout_is_stacked_and_text_first(self) -> None:
         report = self.build_report()
@@ -253,8 +257,7 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
 
         self.assertIn("report-sections", html)
         self.assertIn("summary-item", html)
-        self.assertLess(html.index("Top Categories"), html.index("Category Tree"))
-        self.assertLess(html.index("Category Tree"), html.index("Category Sunburst"))
+        self.assertLess(html.index("Kategorien"), html.index("Category Sunburst"))
         self.assertLess(html.index("Category Sunburst"), html.index("Timeline (barchart)"))
         self.assertLess(html.index("Timeline (barchart)"), html.index("Top Window Titles"))
         self.assertLess(html.index("Top Window Titles"), html.index("Top Applications"))

@@ -1206,13 +1206,7 @@ def seconds_to_hours(seconds: float) -> float:
 
 def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[str, bytes]]) -> str:
     total_time = format_seconds(report.total_seconds)
-    category_tree_html = build_category_tree_html(report.category_seconds)
-    top_categories_html = build_bar_list_html(
-        report.category_seconds,
-        config.top_items_limit,
-        item_formatter=lambda path: " > ".join(path),
-        show_percent=True,
-    )
+    category_hierarchy_html = build_category_hierarchy_html(report.category_seconds)
     top_titles_html = build_bar_list_html(report.title_seconds, config.top_items_limit)
     top_apps_html = build_bar_list_html(report.app_seconds, config.top_items_limit)
 
@@ -1305,40 +1299,63 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
           .muted {{
             color: #6b7280;
           }}
-          .tree-list {{
+          .category-list {{
             display: block;
           }}
-          .tree-entry {{
-            display: block;
-            padding: 6px 0 6px calc(var(--depth, 0) * 18px);
+          .category-root {{
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            padding: 8px 0 4px;
             border-top: 1px solid #eef1f5;
           }}
-          .tree-main {{
+          .category-root:first-child {{
+            border-top: 0;
+            padding-top: 0;
+          }}
+          .category-root .tree-name {{
+            font-weight: 700;
+          }}
+          .category-sublist {{
+            display: block;
+            margin: 0 0 8px 18px;
+            padding-left: 12px;
+            border-left: 2px solid #eef1f5;
+          }}
+          .category-entry {{
+            display: block;
+            padding: 6px 0 5px 0;
+          }}
+          .category-line {{
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 10px;
             min-width: 0;
+            flex-wrap: nowrap;
           }}
-          .tree-marker {{
+          .category-marker {{
             color: #7a8493;
-            font-size: 13px;
+            font-size: 16px;
             line-height: 1;
             flex: 0 0 auto;
           }}
-          .tree-name {{
+          .category-name {{
+            flex: 1 1 auto;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }}
-          .tree-duration {{
+          .category-duration {{
+            flex: 0 0 auto;
             color: #4a5568;
-            margin-top: 3px;
+            margin-top: 0;
             white-space: nowrap;
           }}
-          .tree-percent {{
-            margin-left: 8px;
+          .category-percent {{
+            flex: 0 0 auto;
             color: #7a8493;
             font-size: 12px;
+            white-space: nowrap;
           }}
           img {{
             max-width: 100%;
@@ -1360,12 +1377,8 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
 
           <div class="report-sections">
             <section class="card">
-              <h2>Top Categories</h2>
-              {top_categories_html}
-            </section>
-            <section class="card">
-              <h2>Category Tree</h2>
-              {category_tree_html}
+              <h2>Kategorien</h2>
+              {category_hierarchy_html}
             </section>
             <section class="card">
               <h2>Category Sunburst</h2>
@@ -1438,7 +1451,7 @@ def build_bar_list_html(
     return "".join(html_rows)
 
 
-def build_category_tree_html(category_seconds: dict[tuple[str, ...], float]) -> str:
+def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]) -> str:
     if not category_seconds:
         return "<p class='muted'>Keine Daten</p>"
 
@@ -1455,25 +1468,49 @@ def build_category_tree_html(category_seconds: dict[tuple[str, ...], float]) -> 
 
     total_seconds = sum(category_seconds.values()) or 1.0
 
-    def render_node(node: dict[str, Any], prefix: tuple[str, ...], depth: int = 0) -> str:
-        items = []
-        for name in sorted(node.keys()):
+    root_items = sorted(tree.keys(), key=lambda name: totals.get((name,), 0.0), reverse=True)
+    html: list[str] = ['<div class="category-list">']
+
+    def render_node(node: dict[str, Any], prefix: tuple[str, ...], parent_seconds: float) -> str:
+        entries: list[str] = []
+        for name in sorted(node.keys(), key=lambda key: totals.get(prefix + (key,), 0.0), reverse=True):
             current_path = prefix + (name,)
             seconds = totals.get(current_path, 0.0)
-            percent = seconds / total_seconds * 100
+            percent_total = seconds / total_seconds * 100
+            percent_parent = seconds / parent_seconds * 100 if parent_seconds else 0.0
             children = node[name]
-            children_html = render_node(children, current_path, depth + 1) if children else ""
-            items.append(
-                f'<div class="tree-entry" style="--depth: {depth};">'
-                f'<div class="tree-main"><span class="tree-marker">⊞</span><span class="tree-name">{escape_html(name)}</span></div>'
-                f'<div class="tree-duration">{escape_html(format_duration_compact(seconds))}</div>'
-                f'<span class="tree-percent">{percent:.1f}%</span>'
-                f"</div>"
-                f"{children_html}"
+            child_html = render_node(children, current_path, seconds) if children else ""
+            entries.append(
+                '<div class="category-entry">'
+                f'<div class="category-line" style="padding-left: {len(prefix) * 18}px;">'
+                f'<span class="category-marker">•</span>'
+                f'<span class="category-name">{escape_html(name)}</span>'
+                f'<span class="category-duration">{escape_html(format_duration_compact(seconds))}</span>'
+                f'<span class="category-percent">{percent_total:.1f}% gesamt · {percent_parent:.1f}% oberkategorie</span>'
+                "</div>"
+                f"{child_html}"
+                "</div>"
             )
-        return f'<div class="tree-list">{"" .join(items)}</div>' if items else ""
+        return "".join(entries)
 
-    return render_node(tree, ())
+    for root_name in root_items:
+        root_path = (root_name,)
+        root_seconds = totals.get(root_path, 0.0)
+        root_children = tree[root_name]
+        root_total_percent = root_seconds / total_seconds * 100
+        html.append(
+            '<div class="category-root">'
+            f'<span class="category-marker">•</span>'
+            f'<span class="category-name">{escape_html(root_name)}</span>'
+            f'<span class="category-duration">{escape_html(format_duration_compact(root_seconds))}</span>'
+            f'<span class="category-percent">{root_total_percent:.1f}% gesamt</span>'
+            "</div>"
+        )
+        if root_children:
+            html.append(f'<div class="category-sublist">{render_node(root_children, root_path, root_seconds)}</div>')
+
+    html.append("</div>")
+    return "".join(html)
 
 
 def format_duration_compact(seconds: float) -> str:

@@ -1302,19 +1302,6 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
             margin-top: 1px;
             color: rgba(32, 37, 45, 0.82);
           }}
-          .show-more {{
-            margin-top: 8px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            border: 1px solid #97a2b4;
-            border-radius: 4px;
-            padding: 4px 10px;
-            color: #4a5a72;
-            background: #fff;
-            font-size: 13px;
-            width: fit-content;
-          }}
           .muted {{
             color: #6b7280;
           }}
@@ -1447,8 +1434,6 @@ def build_bar_list_html(
             f"{percent_html}"
             "</div>"
         )
-    if len(rows) < len(values):
-        html_rows.append('<div class="show-more">⌄⌄ Show more</div>')
     html_rows.append("</div>")
     return "".join(html_rows)
 

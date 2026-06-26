@@ -1304,7 +1304,7 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
           }}
           .category-root {{
             display: flex;
-            align-items: baseline;
+            align-items: center;
             gap: 10px;
             padding: 8px 0 4px;
             border-top: 1px solid #eef1f5;
@@ -1335,12 +1335,14 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
           }}
           .category-marker {{
             color: #7a8493;
-            font-size: 16px;
-            line-height: 1;
+            font-size: 13px;
+            line-height: 1.1;
             flex: 0 0 auto;
           }}
           .category-name {{
             flex: 1 1 auto;
+            font-size: 13px;
+            line-height: 1.1;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -1349,12 +1351,15 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
             flex: 0 0 auto;
             color: #4a5568;
             margin-top: 0;
+            font-size: 13px;
+            line-height: 1.1;
             white-space: nowrap;
           }}
           .category-percent {{
             flex: 0 0 auto;
             color: #7a8493;
             font-size: 12px;
+            line-height: 1.1;
             white-space: nowrap;
           }}
           img {{
@@ -1482,12 +1487,13 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
             child_html = render_node(children, current_path, seconds) if children else ""
             entries.append(
                 '<div class="category-entry">'
-                f'<div class="category-line" style="padding-left: {len(prefix) * 18}px;">'
-                f'<span class="category-marker">•</span>'
-                f'<span class="category-name">{escape_html(name)}</span>'
-                f'<span class="category-duration">{escape_html(format_duration_compact(seconds))}</span>'
-                f'<span class="category-percent">{percent_total:.1f}% gesamt · {percent_parent:.1f}% oberkategorie</span>'
-                "</div>"
+            f'<div class="category-line" style="padding-left: {len(prefix) * 18}px;">'
+            f'<span class="category-marker">•</span>'
+            f'<span class="category-name">{escape_html(name)}</span>'
+            '<span class="category-separator"> - </span>'
+            f'<span class="category-duration">{escape_html(format_duration_compact(seconds))}</span>'
+            f'<span class="category-percent">{percent_total:.1f}% gesamt · {percent_parent:.1f}% oberkategorie</span>'
+            "</div>"
                 f"{child_html}"
                 "</div>"
             )
@@ -1502,6 +1508,7 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
             '<div class="category-root">'
             f'<span class="category-marker">•</span>'
             f'<span class="category-name">{escape_html(root_name)}</span>'
+            '<span class="category-separator"> - </span>'
             f'<span class="category-duration">{escape_html(format_duration_compact(root_seconds))}</span>'
             f'<span class="category-percent">{root_total_percent:.1f}% gesamt</span>'
             "</div>"

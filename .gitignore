@@ -3,3 +3,4 @@ config.json
 *.png
 __pycache__/
 .agents
+~$ail**.docx

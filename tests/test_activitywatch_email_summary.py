@@ -25,6 +25,51 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tz = ZoneInfo("Europe/Berlin")
 
+    def build_config(self, top_items_limit: int = 5) -> aw.AppConfig:
+        return aw.AppConfig(
+            enabled_timeframes=("daily",),
+            top_items_limit=top_items_limit,
+            lookback_days=30,
+            week_start_day=0,
+            aw_api_base_url="http://localhost:5600",
+            timezone=self.tz,
+            smtp_settings=aw.SMTPSettings(
+                server="smtp.example.com",
+                port=587,
+                sender_email="from@example.com",
+                recipient_email="to@example.com",
+                username="user",
+                password="pass",
+            ),
+        )
+
+    def build_report(self) -> aw.ReportData:
+        period_start = datetime(2026, 6, 25, 0, 0, tzinfo=self.tz)
+        period = aw.ReportPeriod(
+            timeframe="daily",
+            start=period_start,
+            end=period_start + timedelta(hours=1),
+            label="2026-06-25",
+            key="2026-06-25",
+        )
+        return aw.ReportData(
+            period=period,
+            total_seconds=7200.0,
+            app_seconds={"Code": 3600.0, "Firefox": 1800.0, "Explorer": 1800.0},
+            title_seconds={
+                "main.py": 3600.0,
+                "ActivityWatch — Mozilla Firefox": 1800.0,
+                "docs": 1800.0,
+            },
+            category_seconds={
+                ("Work", "Dev"): 3600.0,
+                ("Work", "Mail"): 1800.0,
+                ("Comms", "Email"): 1800.0,
+            },
+            timeline_seconds={"09:00": {"Work": 60.0}},
+            events_found=7,
+        )
+
     def test_week_start_is_configurable(self) -> None:
         value = datetime(2026, 6, 24, 15, 30, tzinfo=self.tz)
         week_start = aw.parse_week_start_day("sun")
@@ -158,22 +203,7 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         self.assertEqual(report.title_seconds["main.py"], 3600.0)
 
     def test_build_report_falls_back_to_uncategorized(self) -> None:
-        config = aw.AppConfig(
-            enabled_timeframes=("daily",),
-            top_items_limit=5,
-            lookback_days=30,
-            week_start_day=0,
-            aw_api_base_url="http://localhost:5600",
-            timezone=self.tz,
-            smtp_settings=aw.SMTPSettings(
-                server="smtp.example.com",
-                port=587,
-                sender_email="from@example.com",
-                recipient_email="to@example.com",
-                username="user",
-                password="pass",
-            ),
-        )
+        config = self.build_config()
         period_start = datetime(2026, 6, 25, 0, 0, tzinfo=self.tz)
         period = aw.ReportPeriod(
             timeframe="daily",
@@ -203,6 +233,48 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
             report = aw.build_report(config, bucket_catalog, period)
 
         self.assertEqual(report.category_seconds, {("Uncategorized",): 3600.0})
+
+    def test_top_categories_html_includes_percentages(self) -> None:
+        html = aw.build_bar_list_html(
+            {("Work", "Dev"): 3600.0, ("Comms", "Email"): 1800.0},
+            5,
+            item_formatter=lambda path: " > ".join(path),
+            show_percent=True,
+        )
+
+        self.assertIn("Work &gt; Dev", html)
+        self.assertIn("66.7%", html)
+        self.assertIn("33.3%", html)
+        self.assertNotIn("--bar-width", html)
+
+    def test_email_layout_is_stacked_and_text_first(self) -> None:
+        report = self.build_report()
+        html = aw.build_html_email(self.build_config(), report, [])
+
+        self.assertIn("report-sections", html)
+        self.assertIn("summary-item", html)
+        self.assertLess(html.index("Top Categories"), html.index("Category Tree"))
+        self.assertLess(html.index("Category Tree"), html.index("Category Sunburst"))
+        self.assertLess(html.index("Category Sunburst"), html.index("Timeline (barchart)"))
+        self.assertLess(html.index("Timeline (barchart)"), html.index("Top Window Titles"))
+        self.assertLess(html.index("Top Window Titles"), html.index("Top Applications"))
+        self.assertNotIn("cid:top-apps", html)
+        self.assertNotIn("cid:top-titles", html)
+        self.assertIn("metric-percent", html)
+
+    def test_category_plot_uses_legend_for_labels(self) -> None:
+        fig = aw.create_category_plot(
+            {
+                ("Work", "Dev"): 3600.0,
+                ("Work", "Mail"): 1800.0,
+                ("Comms", "Email"): 1800.0,
+            }
+        )
+
+        self.assertEqual(len(fig.axes), 2)
+        legend_texts = " ".join(text.get_text() for text in fig.axes[1].texts)
+        self.assertIn("Legend", legend_texts)
+        self.assertIn("%", legend_texts)
 
 
 if __name__ == "__main__":

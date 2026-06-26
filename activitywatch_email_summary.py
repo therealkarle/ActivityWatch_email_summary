@@ -10,6 +10,7 @@ import smtplib
 import sys
 import tempfile
 import time as time_module
+import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time as dt_time, timedelta, timezone
@@ -956,16 +957,10 @@ def build_email_subject(period: ReportPeriod) -> str:
 def generate_report_images(config: AppConfig, report: ReportData) -> list[tuple[str, bytes]]:
     temp_paths: list[Path] = []
     try:
-        top_apps = top_n_items(report.app_seconds, config.top_items_limit)
-        top_titles = top_n_items(report.title_seconds, config.top_items_limit)
         category_plot = create_category_plot(report.category_seconds)
         timeline_plot = create_timeline_plot(report, config.top_items_limit, config.week_start_day)
-        app_plot = create_horizontal_bar_chart(top_apps, "Top Applications")
-        title_plot = create_horizontal_bar_chart(top_titles, "Top Window Titles")
 
         plots = [
-            ("top-apps", app_plot),
-            ("top-titles", title_plot),
             ("category", category_plot),
             ("timeline", timeline_plot),
         ]
@@ -1050,21 +1045,28 @@ def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> F
 
 
 def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figure:
-    fig, ax = plt.subplots(figsize=(7.2, 7.2))
+    leaf_items = sorted(category_seconds.items(), key=lambda item: item[1], reverse=True)
+    legend_columns = 1 if len(leaf_items) <= 8 else 2
+    rows_per_column = max(1, (len(leaf_items) + legend_columns - 1) // legend_columns)
+    legend_height = max(3.6, 0.5 * rows_per_column + 1.3)
+    fig, (ax, legend_ax) = plt.subplots(
+        1,
+        2,
+        figsize=(10.0, legend_height),
+        gridspec_kw={"width_ratios": [1.15, 1.0]},
+    )
     if not category_seconds:
         ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=14)
         ax.set_axis_off()
+        legend_ax.set_axis_off()
         return fig
 
-    leaf_items = sorted(category_seconds.items(), key=lambda item: item[1], reverse=True)
     inner_totals: dict[str, float] = defaultdict(float)
-    outer_labels: list[str] = []
     outer_sizes: list[float] = []
     outer_colors: list[tuple[float, float, float, float]] = []
     palette = plt.get_cmap("tab20")
 
     for index, (path, seconds) in enumerate(leaf_items):
-        outer_labels.append(" > ".join(path))
         outer_sizes.append(seconds)
         outer_colors.append(palette(index % 20))
         inner_totals[path[0]] += seconds
@@ -1075,25 +1077,49 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
 
     ax.pie(
         inner_sizes,
-        labels=inner_labels,
         radius=1.0,
         wedgeprops=dict(width=0.28, edgecolor="white"),
-        autopct=lambda pct: f"{pct:.1f}%" if pct >= 8 else "",
         startangle=90,
         colors=inner_colors,
-        textprops={"fontsize": 8},
     )
     ax.pie(
         outer_sizes,
-        labels=outer_labels,
         radius=1.0 - 0.28,
-        labeldistance=0.78,
         wedgeprops=dict(width=0.28, edgecolor="white"),
         startangle=90,
         colors=outer_colors,
-        textprops={"fontsize": 7.5},
     )
+    ax.set_aspect("equal")
     ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
+
+    legend_ax.set_axis_off()
+    legend_ax.set_xlim(0, 1)
+    legend_ax.set_ylim(0, 1)
+    legend_ax.text(0.0, 0.98, "Legend", fontsize=11.5, fontweight="bold", va="top", ha="left")
+    total_seconds = sum(category_seconds.values()) or 1.0
+    column_width = 1.0 / legend_columns
+    for index, ((path, seconds), color) in enumerate(zip(leaf_items, outer_colors)):
+        percent = seconds / total_seconds * 100
+        label = " > ".join(path)
+        wrapped = textwrap.wrap(label, width=28, break_long_words=False, break_on_hyphens=False) or [label]
+        display_label = "\n".join(wrapped[:2])
+        if len(wrapped) > 2:
+            display_label = f"{display_label}\n..."
+        column = min(legend_columns - 1, index // rows_per_column)
+        row = index % rows_per_column
+        y = 0.9 - row * (0.82 / max(1, rows_per_column - 1))
+        x_base = column * column_width
+        legend_ax.text(x_base + 0.0, y, "■", color=color, fontsize=11, va="top", ha="left")
+        legend_ax.text(x_base + 0.055, y, display_label, fontsize=9.0, va="top", ha="left")
+        legend_ax.text(
+            x_base + column_width - 0.02,
+            y,
+            f"{format_duration_compact(seconds)} · {percent:.1f}%",
+            fontsize=9.0,
+            va="top",
+            ha="right",
+            color="#4a5568",
+        )
     return fig
 
 
@@ -1185,9 +1211,10 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
         report.category_seconds,
         config.top_items_limit,
         item_formatter=lambda path: " > ".join(path),
+        show_percent=True,
     )
-    top_apps_more_html = '<div class="show-more">⌄⌄ Show more</div>' if len(report.app_seconds) > config.top_items_limit else ""
-    top_titles_more_html = '<div class="show-more">⌄⌄ Show more</div>' if len(report.title_seconds) > config.top_items_limit else ""
+    top_titles_html = build_bar_list_html(report.title_seconds, config.top_items_limit)
+    top_apps_html = build_bar_list_html(report.app_seconds, config.top_items_limit)
 
     html = f"""
     <html>
@@ -1199,78 +1226,81 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
             color: #243041;
             line-height: 1.45;
             background: #ffffff;
+            margin: 0;
+            padding: 0;
           }}
           .wrap {{
-            max-width: 1180px;
+            max-width: 820px;
             margin: 0 auto;
-            padding: 16px 18px 28px;
+            padding: 18px 20px 28px;
           }}
           .header {{
-            margin-bottom: 14px;
+            margin-bottom: 12px;
           }}
           .header h1 {{
             margin: 0;
-            font-size: 28px;
+            font-size: 30px;
             font-weight: 700;
           }}
           .summary {{
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-top: 8px;
+            display: block;
+            margin-top: 10px;
             color: #5b6574;
             font-size: 13px;
           }}
+          .summary-item {{
+            margin-top: 2px;
+          }}
           .card {{
             background: #fff;
-            border: 1px solid #e6e8ee;
-            border-radius: 10px;
-            padding: 12px 12px 14px;
+            border-top: 1px solid #e6e8ee;
+            padding: 14px 0 14px;
             box-sizing: border-box;
             overflow: hidden;
           }}
           .card h2 {{
             margin: 0 0 10px;
-            font-size: 20px;
-            font-weight: 500;
+            font-size: 21px;
+            font-weight: 700;
             color: #243041;
           }}
-          .dashboard-grid {{
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 16px 18px;
-            align-items: start;
+          .report-sections {{
+            display: block;
           }}
-          .dashboard-grid .card img {{
+          .report-sections .card img {{
             margin-top: 0;
           }}
           .metric-list {{
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
+            display: block;
           }}
           .metric-item {{
             --bar-color: #87cefa;
-            --bar-width: 100%;
-            width: var(--bar-width);
-            min-width: 120px;
-            background: var(--bar-color);
-            border-radius: 5px;
-            padding: 6px 7px 5px;
+            display: block;
+            width: 100%;
+            background: rgba(103, 208, 255, 0.12);
+            border-left: 8px solid var(--bar-color);
+            border-radius: 6px;
+            padding: 7px 10px 7px 10px;
             color: #20252d;
             box-sizing: border-box;
-            box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+            margin-top: 8px;
+          }}
+          .metric-item:first-child {{
+            margin-top: 0;
           }}
           .metric-label {{
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            word-break: break-word;
           }}
           .metric-duration {{
-            font-size: 11px;
-            margin-top: 2px;
+            font-size: 12px;
+            margin-top: 3px;
+          }}
+          .metric-percent {{
+            font-size: 12px;
+            margin-top: 1px;
+            color: rgba(32, 37, 45, 0.82);
           }}
           .show-more {{
             margin-top: 8px;
@@ -1289,16 +1319,12 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
             color: #6b7280;
           }}
           .tree-list {{
-            display: flex;
-            flex-direction: column;
-            gap: 7px;
+            display: block;
           }}
           .tree-entry {{
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 10px;
-            padding-left: calc(var(--depth, 0) * 16px);
+            display: block;
+            padding: 6px 0 6px calc(var(--depth, 0) * 18px);
+            border-top: 1px solid #eef1f5;
           }}
           .tree-main {{
             display: flex;
@@ -1319,41 +1345,18 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
           }}
           .tree-duration {{
             color: #4a5568;
+            margin-top: 3px;
             white-space: nowrap;
-            margin-left: 12px;
-            flex: 0 0 auto;
           }}
           .tree-percent {{
             margin-left: 8px;
             color: #7a8493;
             font-size: 12px;
           }}
-          .tree-footnote {{
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 1px solid #e6e8ee;
-          }}
-          .checkbox {{
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            font-size: 13px;
-            color: #4a5568;
-          }}
           img {{
             max-width: 100%;
             height: auto;
             display: block;
-          }}
-          @media (max-width: 1080px) {{
-            .dashboard-grid {{
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-            }}
-          }}
-          @media (max-width: 720px) {{
-            .dashboard-grid {{
-              grid-template-columns: 1fr;
-            }}
           }}
         </style>
       </head>
@@ -1362,27 +1365,13 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
           <div class="header">
             <h1>ActivityWatch {escape_html(report.period.timeframe.title())} Report</h1>
             <div class="summary">
-              <div><strong>Zeitraum:</strong> {escape_html(report.period.label)}</div>
-              <div><strong>Gesamtzeit:</strong> {escape_html(total_time)}</div>
-              <div><strong>Gefundene Events:</strong> {report.events_found}</div>
+              <div class="summary-item"><strong>Zeitraum:</strong> {escape_html(report.period.label)}</div>
+              <div class="summary-item"><strong>Gesamtzeit:</strong> {escape_html(total_time)}</div>
+              <div class="summary-item"><strong>Gefundene Events:</strong> {report.events_found}</div>
             </div>
           </div>
 
-          <div class="dashboard-grid">
-            <section class="card">
-              <h2>Top Applications</h2>
-              <img src="cid:top-apps" alt="Top Applications" />
-              {top_apps_more_html}
-            </section>
-            <section class="card">
-              <h2>Top Window Titles</h2>
-              <img src="cid:top-titles" alt="Top Window Titles" />
-              {top_titles_more_html}
-            </section>
-            <section class="card">
-              <h2>Timeline (barchart)</h2>
-              <img src="cid:timeline" alt="Timeline" />
-            </section>
+          <div class="report-sections">
             <section class="card">
               <h2>Top Categories</h2>
               {top_categories_html}
@@ -1390,13 +1379,22 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
             <section class="card">
               <h2>Category Tree</h2>
               {category_tree_html}
-              <div class="tree-footnote">
-                <label class="checkbox"><input type="checkbox" /> Show percent</label>
-              </div>
             </section>
             <section class="card">
               <h2>Category Sunburst</h2>
               <img src="cid:category" alt="Category Sunburst" />
+            </section>
+            <section class="card">
+              <h2>Timeline (barchart)</h2>
+              <img src="cid:timeline" alt="Timeline" />
+            </section>
+            <section class="card">
+              <h2>Top Window Titles</h2>
+              {top_titles_html}
+            </section>
+            <section class="card">
+              <h2>Top Applications</h2>
+              {top_apps_html}
             </section>
           </div>
         </div>
@@ -1420,11 +1418,12 @@ def build_bar_list_html(
     values: dict[Any, float],
     limit: int,
     item_formatter: Any | None = None,
+    show_percent: bool = False,
 ) -> str:
     rows = top_n_items(values, limit)
     if not rows:
         return "<p class='muted'>Keine Daten</p>"
-    max_seconds = max((seconds for _, seconds in rows), default=1.0) or 1.0
+    total_seconds = sum(values.values()) or 1.0
     palette = [
         "#67d0ff",
         "#bfc0c0",
@@ -1438,13 +1437,14 @@ def build_bar_list_html(
     html_rows = ['<div class="metric-list">']
     for label, seconds in rows:
         rendered_label = item_formatter(label) if item_formatter else label
-        width = max(16.0, seconds / max_seconds * 100.0)
+        percent = seconds / total_seconds * 100.0
         color = palette[len(html_rows) % len(palette)]
+        percent_html = f"<div class=\"metric-percent\">{percent:.1f}%</div>" if show_percent else ""
         html_rows.append(
-            "<div class=\"metric-item\" "
-            f"style=\"--bar-width: {width:.1f}%; --bar-color: {color};\">"
-            f"<div class=\"metric-label\">{escape_html(str(rendered_label))}</div>"
-            f"<div class=\"metric-duration\">{escape_html(format_duration_compact(seconds))}</div>"
+            f'<div class="metric-item" style="--bar-color: {color};">'
+            f'<div class="metric-label">{escape_html(str(rendered_label))}</div>'
+            f'<div class="metric-duration">{escape_html(format_duration_compact(seconds))}</div>'
+            f"{percent_html}"
             "</div>"
         )
     if len(rows) < len(values):

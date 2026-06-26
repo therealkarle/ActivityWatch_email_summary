@@ -44,6 +44,7 @@ DEFAULT_WEEK_START_DAY = "mon"
 SUPPORTED_TIMEFRAMES = {"daily", "weekly", "monthly", "yearly"}
 WINDOW_BUCKET_HINTS = ("aw-watcher-window", "window")
 AFK_BUCKET_HINTS = ("aw-watcher-afk", "afk")
+DEFAULT_CATEGORY_NAME = "Uncategorized"
 WEEKDAY_BUCKETS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MONTH_BUCKETS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 WEEK_START_DAYS = {
@@ -94,6 +95,7 @@ class WindowEvent:
     app: str
     title: str
     bucket_id: str
+    category_path: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -536,30 +538,58 @@ def api_get_json(api_base_url: str, path: str, params: dict[str, Any] | None = N
         raise RuntimeError(f"Netzwerkfehler bei {url}: {exc.reason}") from exc
 
 
+def api_post_json(api_base_url: str, path: str, data: dict[str, Any]) -> Any:
+    url = f"{api_base_url}{path}"
+    payload = json.dumps(data).encode("utf-8")
+    req = Request(
+        url,
+        data=payload,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=30) as response:
+            payload_text = response.read().decode("utf-8")
+        return json.loads(payload_text)
+    except HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} bei {url}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Netzwerkfehler bei {url}: {exc.reason}") from exc
+
+
 def derive_category_path(bucket_id: str, bucket: dict[str, Any]) -> tuple[str, ...]:
     raw_value: Any = bucket.get("category")
     if raw_value is None:
         data = bucket.get("data", {})
         if isinstance(data, dict):
             raw_value = data.get("category")
-    if raw_value is None:
-        raw_value = bucket.get("name") or bucket_id
 
     if isinstance(raw_value, (list, tuple)):
         parts = [normalize_path_segment(part) for part in raw_value if str(part).strip()]
-    else:
+    elif raw_value is not None:
         parts = [
             normalize_path_segment(part)
             for part in re.split(r"\s*(?:/|>|\\|\|)\s*", str(raw_value))
             if str(part).strip()
         ]
+    else:
+        parts = []
 
-    return tuple(parts) if parts else (normalize_path_segment(bucket_id),)
+    return tuple(parts) if parts else (DEFAULT_CATEGORY_NAME,)
 
 
 def build_report(config: AppConfig, bucket_catalog: BucketCatalog, period: ReportPeriod) -> ReportData:
-    window_events = fetch_window_events(config, list(bucket_catalog.window_bucket_ids), period)
-    active_intervals = fetch_active_intervals(config, list(bucket_catalog.afk_bucket_ids), period)
+    canonical_window_events = fetch_canonical_window_events(config, bucket_catalog, period)
+    use_event_durations = canonical_window_events is not None
+    if canonical_window_events is None:
+        window_events = fetch_window_events(config, list(bucket_catalog.window_bucket_ids), period)
+        active_intervals = fetch_active_intervals(config, list(bucket_catalog.afk_bucket_ids), period)
+    else:
+        window_events = canonical_window_events
+        active_intervals = []
 
     app_seconds: dict[str, float] = defaultdict(float)
     title_seconds: dict[str, float] = defaultdict(float)
@@ -572,15 +602,15 @@ def build_report(config: AppConfig, bucket_catalog: BucketCatalog, period: Repor
         if clipped_end <= clipped_start:
             continue
         seconds = (
-            overlap_seconds_with_intervals(clipped_start, clipped_end, active_intervals)
-            if active_intervals
-            else event_duration_seconds(clipped_start, clipped_end)
+            event_duration_seconds(clipped_start, clipped_end)
+            if use_event_durations
+            else overlap_seconds_with_intervals(clipped_start, clipped_end, active_intervals)
         )
         if seconds <= 0:
             continue
         app_key = event.app or "Unknown"
         title_key = event.title or "Unknown"
-        category_path = resolve_category_path(bucket_catalog, event.bucket_id)
+        category_path = event.category_path or resolve_category_path(bucket_catalog, event.bucket_id)
         app_seconds[app_key] += seconds
         title_seconds[title_key] += seconds
         category_seconds[category_path] += seconds
@@ -629,6 +659,180 @@ def fetch_window_events(config: AppConfig, bucket_ids: list[str], period: Report
                 continue
     events.sort(key=lambda item: item.start)
     return events
+
+
+def fetch_canonical_window_events(
+    config: AppConfig,
+    bucket_catalog: BucketCatalog,
+    period: ReportPeriod,
+) -> list[WindowEvent] | None:
+    try:
+        categories = load_activitywatch_categories(config.aw_api_base_url)
+
+        events: list[WindowEvent] = []
+        for window_bucket_id in bucket_catalog.window_bucket_ids:
+            afk_bucket_id = match_afk_bucket(bucket_catalog.afk_bucket_ids, window_bucket_id)
+            query = build_canonical_window_query(window_bucket_id, afk_bucket_id, categories)
+            raw_result = api_post_json(
+                config.aw_api_base_url,
+                "/api/0/query/",
+                data={
+                    "timeperiods": [
+                        "/".join(
+                            [
+                                period.start.astimezone(timezone.utc).isoformat(),
+                                period.end.astimezone(timezone.utc).isoformat(),
+                            ]
+                        )
+                    ],
+                    "query": query.split("\n"),
+                },
+            )
+            raw_events = unwrap_query_result(raw_result)
+            if not isinstance(raw_events, list):
+                continue
+            for raw in raw_events:
+                try:
+                    data = raw.get("data", {}) if isinstance(raw, dict) else {}
+                    start_value = raw.get("timestamp") if isinstance(raw, dict) else None
+                    if not isinstance(start_value, str):
+                        continue
+                    start = parse_aw_timestamp(start_value, config.timezone)
+                    duration = float(raw.get("duration", 0)) if isinstance(raw, dict) else 0.0
+                    end = start + timedelta(seconds=duration)
+                    events.append(
+                        WindowEvent(
+                            start=start,
+                            end=end,
+                            app=str(data.get("app", "")),
+                            title=str(data.get("title", "")),
+                            bucket_id=window_bucket_id,
+                            category_path=extract_category_path(raw, bucket_catalog, window_bucket_id),
+                        )
+                    )
+                except Exception:
+                    continue
+        events.sort(key=lambda item: item.start)
+        return events
+    except Exception as exc:
+        LOGGER.info("Canonical ActivityWatch-Kategorien nicht verfügbar, nutze Fallback: %s", exc)
+        return None
+
+
+def load_activitywatch_categories(api_base_url: str) -> list[Any]:
+    settings = api_get_json(api_base_url, "/api/0/settings")
+    if not isinstance(settings, dict):
+        return []
+    classes = settings.get("classes", [])
+    if not isinstance(classes, list):
+        return []
+    normalized: list[Any] = []
+    for raw in classes:
+        category = normalize_activitywatch_category(raw)
+        if category is not None:
+            normalized.append(category)
+    return normalized
+
+
+def normalize_activitywatch_category(raw: Any) -> list[Any] | None:
+    if not isinstance(raw, dict):
+        return None
+
+    raw_name = raw.get("name")
+    if isinstance(raw_name, list):
+        name = [normalize_path_segment(part) for part in raw_name if str(part).strip()]
+    elif raw_name is not None:
+        name = [normalize_path_segment(raw_name)]
+    else:
+        name = []
+
+    raw_rule = raw.get("rule")
+    if not isinstance(raw_rule, dict):
+        return None
+
+    rule: dict[str, Any] = {}
+    rule_type = str(raw_rule.get("type", "")).strip().lower()
+    if rule_type in {"none", "no rule", "no_rule"}:
+        rule["type"] = "none"
+    else:
+        rule["type"] = "regex"
+        regex_value = raw_rule.get("regex")
+        if regex_value is None:
+            return None
+        rule["regex"] = str(regex_value)
+        if raw_rule.get("ignore_case") is not None:
+            rule["ignore_case"] = bool(raw_rule.get("ignore_case"))
+
+    return [name, rule] if name else None
+
+
+def match_afk_bucket(afk_bucket_ids: tuple[str, ...], window_bucket_id: str) -> str | None:
+    suffix = window_bucket_id.split("_", 1)[1] if "_" in window_bucket_id else ""
+    if suffix:
+        expected = f"aw-watcher-afk_{suffix}"
+        for bucket_id in afk_bucket_ids:
+            if bucket_id == expected:
+                return bucket_id
+    return afk_bucket_ids[0] if afk_bucket_ids else None
+
+
+def build_canonical_window_query(
+    window_bucket_id: str,
+    afk_bucket_id: str | None,
+    categories: list[Any],
+) -> str:
+    classes_str = json.dumps(categories)
+    classes_str = re.sub(r"\\\\", r"\\", classes_str)
+
+    lines = [f'events = flood(query_bucket("{escape_query_string(window_bucket_id)}"));']
+    if afk_bucket_id:
+        lines.extend(
+            [
+                f'not_afk = flood(query_bucket("{escape_query_string(afk_bucket_id)}"));',
+                'not_afk = filter_keyvals(not_afk, "status", ["not-afk"]);',
+                "events = filter_period_intersect(events, not_afk);",
+            ]
+        )
+    if categories:
+        lines.append(f"events = categorize(events, {classes_str});")
+    lines.append("RETURN = events;")
+    return "\n".join(lines)
+
+
+def escape_query_string(value: str) -> str:
+    return value.replace('"', '\\"')
+
+
+def unwrap_query_result(raw: Any) -> Any:
+    if isinstance(raw, dict) and "events" in raw:
+        return raw["events"]
+    if isinstance(raw, list):
+        if len(raw) == 1:
+            return raw[0]
+        return raw
+    return raw
+
+
+def extract_category_path(raw_event: Any, bucket_catalog: BucketCatalog, bucket_id: str) -> tuple[str, ...]:
+    if not isinstance(raw_event, dict):
+        return resolve_category_path(bucket_catalog, bucket_id)
+    data = raw_event.get("data", {})
+    if isinstance(data, dict):
+        raw_value: Any = data.get("$category")
+        if raw_value is None:
+            raw_value = data.get("category")
+        if raw_value is not None:
+            if isinstance(raw_value, (list, tuple)):
+                parts = [normalize_path_segment(part) for part in raw_value if str(part).strip()]
+            else:
+                parts = [
+                    normalize_path_segment(part)
+                    for part in re.split(r"\s*(?:/|>|\\|\|)\s*", str(raw_value))
+                    if str(part).strip()
+                ]
+            if parts:
+                return tuple(parts)
+    return resolve_category_path(bucket_catalog, bucket_id)
 
 
 def fetch_active_intervals(config: AppConfig, bucket_ids: list[str], period: ReportPeriod) -> list[tuple[datetime, datetime]]:
@@ -702,7 +906,7 @@ def merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[da
 
 
 def resolve_category_path(bucket_catalog: BucketCatalog, bucket_id: str) -> tuple[str, ...]:
-    return bucket_catalog.category_paths.get(bucket_id, (normalize_path_segment(bucket_id),))
+    return bucket_catalog.category_paths.get(bucket_id, (DEFAULT_CATEGORY_NAME,))
 
 
 def category_root(path: tuple[str, ...]) -> str:

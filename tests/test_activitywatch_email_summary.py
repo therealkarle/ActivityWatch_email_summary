@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 from zoneinfo import ZoneInfo
 import unittest
 
@@ -71,6 +72,116 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         self.assertEqual(periods[0].start, start)
         self.assertEqual(periods[0].key, "2026-06-22")
         self.assertEqual(periods[0].label, "2026-06-22")
+
+    def test_extract_category_path_prefers_query_category(self) -> None:
+        bucket_catalog = aw.BucketCatalog(window_bucket_ids=(), afk_bucket_ids=(), category_paths={})
+
+        path = aw.extract_category_path(
+            {"data": {"$category": ["Work", "Mail"]}},
+            bucket_catalog,
+            "aw-watcher-window_FlorianPC",
+        )
+
+        self.assertEqual(path, ("Work", "Mail"))
+
+    def test_build_report_uses_canonical_categories_when_available(self) -> None:
+        config = aw.AppConfig(
+            enabled_timeframes=("daily",),
+            top_items_limit=5,
+            lookback_days=30,
+            week_start_day=0,
+            aw_api_base_url="http://localhost:5600",
+            timezone=self.tz,
+            smtp_settings=aw.SMTPSettings(
+                server="smtp.example.com",
+                port=587,
+                sender_email="from@example.com",
+                recipient_email="to@example.com",
+                username="user",
+                password="pass",
+            ),
+        )
+        period_start = datetime(2026, 6, 25, 0, 0, tzinfo=self.tz)
+        period = aw.ReportPeriod(
+            timeframe="daily",
+            start=period_start,
+            end=period_start + timedelta(hours=1),
+            label="2026-06-25",
+            key="2026-06-25",
+        )
+        bucket_catalog = aw.BucketCatalog(
+            window_bucket_ids=("aw-watcher-window_FlorianPC",),
+            afk_bucket_ids=("aw-watcher-afk_FlorianPC",),
+            category_paths={},
+        )
+        canonical_events = [
+            aw.WindowEvent(
+                start=period_start,
+                end=period_start + timedelta(hours=1),
+                app="Code",
+                title="main.py",
+                bucket_id="aw-watcher-window_FlorianPC",
+                category_path=("Work", "Dev"),
+            )
+        ]
+
+        with mock.patch.object(aw, "fetch_canonical_window_events", return_value=canonical_events), mock.patch.object(
+            aw, "fetch_window_events"
+        ) as raw_fetch, mock.patch.object(aw, "fetch_active_intervals") as active_fetch:
+            report = aw.build_report(config, bucket_catalog, period)
+
+        raw_fetch.assert_not_called()
+        active_fetch.assert_not_called()
+        self.assertEqual(report.category_seconds, {("Work", "Dev"): 3600.0})
+        self.assertEqual(report.app_seconds["Code"], 3600.0)
+        self.assertEqual(report.title_seconds["main.py"], 3600.0)
+
+    def test_build_report_falls_back_to_uncategorized(self) -> None:
+        config = aw.AppConfig(
+            enabled_timeframes=("daily",),
+            top_items_limit=5,
+            lookback_days=30,
+            week_start_day=0,
+            aw_api_base_url="http://localhost:5600",
+            timezone=self.tz,
+            smtp_settings=aw.SMTPSettings(
+                server="smtp.example.com",
+                port=587,
+                sender_email="from@example.com",
+                recipient_email="to@example.com",
+                username="user",
+                password="pass",
+            ),
+        )
+        period_start = datetime(2026, 6, 25, 0, 0, tzinfo=self.tz)
+        period = aw.ReportPeriod(
+            timeframe="daily",
+            start=period_start,
+            end=period_start + timedelta(hours=1),
+            label="2026-06-25",
+            key="2026-06-25",
+        )
+        bucket_catalog = aw.BucketCatalog(
+            window_bucket_ids=("aw-watcher-window_FlorianPC",),
+            afk_bucket_ids=("aw-watcher-afk_FlorianPC",),
+            category_paths={},
+        )
+        raw_events = [
+            aw.WindowEvent(
+                start=period_start,
+                end=period_start + timedelta(hours=1),
+                app="Code",
+                title="main.py",
+                bucket_id="aw-watcher-window_FlorianPC",
+            )
+        ]
+
+        with mock.patch.object(aw, "fetch_canonical_window_events", return_value=None), mock.patch.object(
+            aw, "fetch_window_events", return_value=raw_events
+        ), mock.patch.object(aw, "fetch_active_intervals", return_value=[(period_start, period_start + timedelta(hours=1))]):
+            report = aw.build_report(config, bucket_catalog, period)
+
+        self.assertEqual(report.category_seconds, {("Uncategorized",): 3600.0})
 
 
 if __name__ == "__main__":

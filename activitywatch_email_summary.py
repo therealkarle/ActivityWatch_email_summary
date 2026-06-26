@@ -1489,10 +1489,10 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
                 '<div class="category-entry">'
             f'<div class="category-line" style="padding-left: {len(prefix) * 18}px;">'
             f'<span class="category-marker">•</span>'
-            f'<span class="category-name">{escape_html(name)}</span>'
+            f'<span class="category-name"> {escape_html( name )}</span>'
             '<span class="category-separator"> - </span>'
             f'<span class="category-duration">{escape_html(format_duration_compact(seconds))}</span>'
-            f'<span class="category-percent">{percent_total:.1f}% gesamt · {percent_parent:.1f}% oberkategorie</span>'
+            f'<span class="category-percent"> · {percent_total:.1f}% gesamt · {percent_parent:.1f}% oberkategorie</span>'
             "</div>"
                 f"{child_html}"
                 "</div>"

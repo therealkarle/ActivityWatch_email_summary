@@ -251,6 +251,17 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         self.assertIn("Mail - 30m 0s - <em>25.0% gesamt - 33.3% oberkategorie</em>", html)
         self.assertIn("Comms - 30m 0s - <em>25.0% gesamt</em>", html)
 
+    def test_top_lists_use_plain_text_rows(self) -> None:
+        html = aw.build_bar_list_html(
+            {"ActivityWatch — Mozilla Firefox": 3600.0, "Chrono Analyzer": 1800.0},
+            5,
+        )
+
+        self.assertIn("ActivityWatch — Mozilla Firefox - 1h 0m 0s - <em>66.7% gesamt</em>", html)
+        self.assertIn("Chrono Analyzer - 30m 0s - <em>33.3% gesamt</em>", html)
+        self.assertNotIn("metric-item", html)
+        self.assertNotIn("metric-percent", html)
+
     def test_email_layout_is_stacked_and_text_first(self) -> None:
         report = self.build_report()
         html = aw.build_html_email(self.build_config(), report, [])

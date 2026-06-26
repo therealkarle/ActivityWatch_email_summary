@@ -1264,6 +1264,22 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
           .report-sections .card img {{
             margin-top: 0;
           }}
+          .plain-list {{
+            display: block;
+          }}
+          .plain-line {{
+            display: block;
+            font-size: 13px;
+            line-height: 1.35;
+            color: #243041;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 4px 0;
+          }}
+          .plain-line em {{
+            font-style: italic;
+          }}
           .metric-list {{
             display: block;
           }}
@@ -1391,34 +1407,19 @@ def build_bar_list_html(
     values: dict[Any, float],
     limit: int,
     item_formatter: Any | None = None,
-    show_percent: bool = False,
 ) -> str:
     rows = top_n_items(values, limit)
     if not rows:
         return "<p class='muted'>Keine Daten</p>"
     total_seconds = sum(values.values()) or 1.0
-    palette = [
-        "#67d0ff",
-        "#bfc0c0",
-        "#0b72c6",
-        "#bbe500",
-        "#ffb000",
-        "#80d8ff",
-        "#6fcf97",
-        "#b39ddb",
-    ]
-    html_rows = ['<div class="metric-list">']
+    html_rows = ['<div class="plain-list">']
     for label, seconds in rows:
         rendered_label = item_formatter(label) if item_formatter else label
         percent = seconds / total_seconds * 100.0
-        color = palette[len(html_rows) % len(palette)]
-        percent_html = f"<div class=\"metric-percent\">{percent:.1f}%</div>" if show_percent else ""
         html_rows.append(
-            f'<div class="metric-item" style="--bar-color: {color};">'
-            f'<div class="metric-label">{escape_html(str(rendered_label))}</div>'
-            f'<div class="metric-duration">{escape_html(format_duration_compact(seconds))}</div>'
-            f"{percent_html}"
-            "</div>"
+            f'<div class="plain-line">{escape_html(str(rendered_label))} - '
+            f'{escape_html(format_duration_compact(seconds))} - '
+            f'<em>{percent:.1f}% gesamt</em></div>'
         )
     html_rows.append("</div>")
     return "".join(html_rows)

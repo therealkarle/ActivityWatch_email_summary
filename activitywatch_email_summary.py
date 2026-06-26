@@ -167,15 +167,26 @@ def main() -> int:
     lookback_start = now - timedelta(days=config.lookback_days)
     first_run_start = datetime.combine(first_run_date, dt_time.min, tzinfo=config.timezone)
     reporting_start = max(lookback_start, first_run_start)
+    daily_reporting_start = max(lookback_start, first_run_start - timedelta(days=1))
+    daily_reporting_end = align_start_to_timeframe(now, "daily", config.timezone)
 
     for timeframe in config.enabled_timeframes:
-        periods = enumerate_periods(
-            timeframe,
-            reporting_start,
-            now,
-            config.timezone,
-            config.week_start_day,
-        )
+        if timeframe == "daily":
+            periods = enumerate_periods(
+                timeframe,
+                daily_reporting_start,
+                daily_reporting_end,
+                config.timezone,
+                config.week_start_day,
+            )
+        else:
+            periods = enumerate_periods(
+                timeframe,
+                reporting_start,
+                now,
+                config.timezone,
+                config.week_start_day,
+            )
         for period in periods:
             if is_period_logged(sent_log, period):
                 continue
@@ -485,6 +496,11 @@ def add_timeframe(start: datetime, timeframe: str, tz: ZoneInfo) -> datetime:
     if timeframe == "yearly":
         return start.replace(year=start.year + 1)
     raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+
+def previous_completed_day_window(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
+    end = align_start_to_timeframe(now, "daily", tz)
+    return end - timedelta(days=1), end
 
 
 def build_period_metadata(start: datetime, timeframe: str, tz: ZoneInfo) -> tuple[str, str]:
@@ -928,9 +944,13 @@ def get_timeline_bucket(period: ReportPeriod, moment: datetime, tz: ZoneInfo) ->
 
 def render_email(config: AppConfig, report: ReportData) -> tuple[str, str, list[tuple[str, bytes]]]:
     images = generate_report_images(config, report)
-    subject = f"ActivityWatch {report.period.timeframe} report - {report.period.label}"
+    subject = build_email_subject(report.period)
     html = build_html_email(config, report, images)
     return subject, html, images
+
+
+def build_email_subject(period: ReportPeriod) -> str:
+    return f"ActivityWatch {period.timeframe.title()} Report - {period.label}"
 
 
 def generate_report_images(config: AppConfig, report: ReportData) -> list[tuple[str, bytes]]:

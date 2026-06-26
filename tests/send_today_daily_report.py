@@ -24,12 +24,12 @@ def main() -> int:
         return 1
 
     now = datetime.now(config.timezone)
-    day_start = aw.align_start_to_timeframe(now, "daily", config.timezone)
+    day_start, day_end = aw.previous_completed_day_window(now, config.timezone)
     period_key, period_label = aw.build_period_metadata(day_start, "daily", config.timezone)
     period = aw.ReportPeriod(
         timeframe="daily",
         start=day_start,
-        end=now,
+        end=day_end,
         label=period_label,
         key=period_key,
     )
@@ -40,10 +40,10 @@ def main() -> int:
         subject, html_body, inline_images = aw.render_email(config=config, report=report)
         aw.send_email(config.smtp_settings, subject, html_body, inline_images)
     except Exception as exc:
-        aw.LOGGER.exception("Fehler beim Senden des heutigen Daily-Reports: %s", exc)
+        aw.LOGGER.exception("Fehler beim Senden des letzten abgeschlossenen Daily-Reports: %s", exc)
         return 1
 
-    aw.LOGGER.info("Heutiger Daily-Report gesendet: %s", period.label)
+    aw.LOGGER.info("Letzter abgeschlossener Daily-Report gesendet: %s", period.label)
     return 0
 
 

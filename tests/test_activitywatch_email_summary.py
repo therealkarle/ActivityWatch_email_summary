@@ -52,6 +52,19 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         self.assertEqual(len(buckets), 31)
         self.assertEqual(aw.ordered_timeline_buckets("weekly", aw.parse_week_start_day("sun"))[0], "Sun")
 
+    def test_email_subject_includes_timeframe_and_label(self) -> None:
+        period = aw.ReportPeriod(
+            timeframe="daily",
+            start=datetime(2026, 6, 25, 0, 0, tzinfo=self.tz),
+            end=datetime(2026, 6, 26, 0, 0, tzinfo=self.tz),
+            label="2026-06-25",
+            key="2026-06-25",
+        )
+
+        subject = aw.build_email_subject(period)
+
+        self.assertEqual(subject, "ActivityWatch Daily Report - 2026-06-25")
+
     def test_first_run_date_is_initialized_on_first_start(self) -> None:
         sent_log = {"reports": {}}
         now = datetime(2026, 6, 25, 14, 45, tzinfo=self.tz)
@@ -61,6 +74,14 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         self.assertTrue(updated)
         self.assertEqual(first_run_date.isoformat(), "2026-06-25")
         self.assertEqual(sent_log["first_run_date"], "2026-06-25")
+
+    def test_previous_completed_day_window_uses_yesterday(self) -> None:
+        now = datetime(2026, 6, 26, 14, 45, tzinfo=self.tz)
+
+        start, end = aw.previous_completed_day_window(now, self.tz)
+
+        self.assertEqual(start, datetime(2026, 6, 25, 0, 0, tzinfo=self.tz))
+        self.assertEqual(end, datetime(2026, 6, 26, 0, 0, tzinfo=self.tz))
 
     def test_enumerate_periods_keeps_calendar_key_when_clipped(self) -> None:
         start = datetime(2026, 6, 25, 0, 0, tzinfo=self.tz)

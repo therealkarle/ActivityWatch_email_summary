@@ -285,10 +285,12 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(len(fig.axes), 2)
-        legend_texts = " ".join(text.get_text() for text in fig.axes[1].texts)
-        self.assertIn("Legend", legend_texts)
-        self.assertIn("%", legend_texts)
+        self.assertEqual(len(fig.axes), 1)
+        label_texts = " ".join(text.get_text() for text in fig.axes[0].texts)
+        self.assertIn("Work", label_texts)
+        self.assertIn("Dev", label_texts)
+        self.assertIn("Comms", label_texts)
+        self.assertIn("·", label_texts)
 
 
 if __name__ == "__main__":

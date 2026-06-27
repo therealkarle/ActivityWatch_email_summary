@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import logging
 import os
 import re
@@ -1044,19 +1045,11 @@ def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> F
 
 def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figure:
     leaf_items = sorted(category_seconds.items(), key=lambda item: item[1], reverse=True)
-    legend_columns = 1 if len(leaf_items) <= 8 else 2
-    rows_per_column = max(1, (len(leaf_items) + legend_columns - 1) // legend_columns)
-    legend_height = max(3.6, 0.5 * rows_per_column + 1.3)
-    fig, (ax, legend_ax) = plt.subplots(
-        1,
-        2,
-        figsize=(10.0, legend_height),
-        gridspec_kw={"width_ratios": [1.15, 1.0]},
-    )
+    height = max(6.4, 4.8 + 0.28 * max(0, len(leaf_items) - 4))
+    fig, ax = plt.subplots(figsize=(9.8, height))
     if not category_seconds:
         ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=14)
         ax.set_axis_off()
-        legend_ax.set_axis_off()
         return fig
 
     inner_totals: dict[str, float] = defaultdict(float)
@@ -1073,51 +1066,120 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
     inner_sizes = [inner_totals[label] for label in inner_labels]
     inner_colors = [palette(i) for i in range(len(inner_labels))]
 
-    ax.pie(
+    inner_wedges = ax.pie(
         inner_sizes,
         radius=1.0,
-        wedgeprops=dict(width=0.28, edgecolor="white"),
+        wedgeprops=dict(width=0.28, edgecolor="white", linewidth=1.2),
         startangle=90,
         colors=inner_colors,
     )
-    ax.pie(
+    outer_wedges = ax.pie(
         outer_sizes,
         radius=1.0 - 0.28,
-        wedgeprops=dict(width=0.28, edgecolor="white"),
+        wedgeprops=dict(width=0.28, edgecolor="white", linewidth=1.2),
         startangle=90,
         colors=outer_colors,
     )
     ax.set_aspect("equal")
     ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
 
-    legend_ax.set_axis_off()
-    legend_ax.set_xlim(0, 1)
-    legend_ax.set_ylim(0, 1)
-    legend_ax.text(0.0, 0.98, "Legend", fontsize=11.5, fontweight="bold", va="top", ha="left")
+    for label, wedge, color in zip(inner_labels, inner_wedges[0], inner_colors):
+        angle = math.radians((wedge.theta1 + wedge.theta2) / 2.0)
+        radius = 0.87
+        x = math.cos(angle) * radius
+        y = math.sin(angle) * radius
+        display_label = "\n".join(
+            textwrap.wrap(label, width=14, break_long_words=False, break_on_hyphens=False)[:2]
+        )
+        ax.text(
+            x,
+            y,
+            display_label,
+            ha="center",
+            va="center",
+            fontsize=10.0,
+            fontweight="bold",
+            color="white",
+            bbox=dict(boxstyle="round,pad=0.18", facecolor=color, edgecolor="none", alpha=0.82),
+        )
+
     total_seconds = sum(category_seconds.values()) or 1.0
-    column_width = 1.0 / legend_columns
-    for index, ((path, seconds), color) in enumerate(zip(leaf_items, outer_colors)):
+    label_items: list[dict[str, Any]] = []
+    for (path, seconds), wedge, color in zip(leaf_items, outer_wedges[0], outer_colors):
         percent = seconds / total_seconds * 100
         label = " > ".join(path)
-        wrapped = textwrap.wrap(label, width=28, break_long_words=False, break_on_hyphens=False) or [label]
+        wrapped = textwrap.wrap(label, width=24, break_long_words=False, break_on_hyphens=False) or [label]
         display_label = "\n".join(wrapped[:2])
         if len(wrapped) > 2:
             display_label = f"{display_label}\n..."
-        column = min(legend_columns - 1, index // rows_per_column)
-        row = index % rows_per_column
-        y = 0.9 - row * (0.82 / max(1, rows_per_column - 1))
-        x_base = column * column_width
-        legend_ax.text(x_base + 0.0, y, "■", color=color, fontsize=11, va="top", ha="left")
-        legend_ax.text(x_base + 0.055, y, display_label, fontsize=9.0, va="top", ha="left")
-        legend_ax.text(
-            x_base + column_width - 0.02,
-            y,
-            f"{format_duration_compact(seconds)} · {percent:.1f}%",
-            fontsize=9.0,
-            va="top",
-            ha="right",
-            color="#4a5568",
+        angle = math.radians((wedge.theta1 + wedge.theta2) / 2.0)
+        x = math.cos(angle)
+        y = math.sin(angle)
+        label_items.append(
+            {
+                "color": color,
+                "display_label": display_label,
+                "duration": format_duration_compact(seconds),
+                "percent": percent,
+                "side": 1 if x >= 0 else -1,
+                "target_y": y * 1.15,
+                "anchor": (x * 0.98, y * 0.98),
+            }
         )
+
+    def spread_labels(items: list[dict[str, Any]]) -> list[float]:
+        if not items:
+            return []
+        items = sorted(items, key=lambda item: item["target_y"])
+        top = 1.25
+        bottom = -1.25
+        min_gap = 0.19 if len(items) <= 8 else 0.14
+        positions = [max(bottom, min(top, item["target_y"])) for item in items]
+        for idx in range(1, len(positions)):
+            positions[idx] = max(positions[idx], positions[idx - 1] + min_gap)
+        if positions[-1] > top:
+            shift = positions[-1] - top
+            positions = [pos - shift for pos in positions]
+        for idx in range(len(positions) - 2, -1, -1):
+            positions[idx] = min(positions[idx], positions[idx + 1] - min_gap)
+        if positions[0] < bottom:
+            shift = bottom - positions[0]
+            positions = [pos + shift for pos in positions]
+        return positions
+
+    left_items = [item for item in label_items if item["side"] < 0]
+    right_items = [item for item in label_items if item["side"] >= 0]
+    left_positions = spread_labels(left_items)
+    right_positions = spread_labels(right_items)
+
+    for items, positions, side in ((left_items, left_positions, -1), (right_items, right_positions, 1)):
+        for item, y in zip(sorted(items, key=lambda value: value["target_y"]), positions):
+            anchor_x, anchor_y = item["anchor"]
+            elbow_x = side * 1.16
+            text_x = side * 1.30
+            line_end_x = side * 1.26
+            ax.plot(
+                [anchor_x, elbow_x, line_end_x],
+                [anchor_y, y, y],
+                color=item["color"],
+                lw=1.05,
+                solid_capstyle="round",
+            )
+            ax.text(
+                text_x,
+                y,
+                f'{item["display_label"]}\n{item["duration"]} · {item["percent"]:.1f}%',
+                ha="left" if side > 0 else "right",
+                va="center",
+                fontsize=8.7,
+                color="#1f2937",
+                bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="none", alpha=0.86),
+            )
+
+    ax.set_xlim(-1.55, 1.55)
+    ax.set_ylim(-1.38, 1.38)
+    ax.set_axis_off()
+    fig.subplots_adjust(left=0.03, right=0.97, top=0.92, bottom=0.05)
     return fig
 
 

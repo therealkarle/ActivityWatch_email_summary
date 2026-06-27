@@ -1013,7 +1013,6 @@ def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> F
     ax.invert_yaxis()
     max_value = max(values) or 1.0
     ax.set_xlim(0, max_value * 1.18)
-    ax.set_title(title, loc="left", fontsize=14, pad=10)
     ax.tick_params(axis="x", bottom=False, labelbottom=False)
     ax.tick_params(axis="y", left=False)
     for spine in ax.spines.values():
@@ -1233,7 +1232,6 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
     render_label_group([item for item in outside_labels if item["side"] < 0])
 
     ax.set_aspect("equal")
-    ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
 
     axis_limit = max(1.25, max_label_radius + stagger_step + 0.18)
     ax.set_xlim(-axis_limit, axis_limit)
@@ -1286,7 +1284,6 @@ def create_timeline_plot(report: ReportData, top_items_limit: int, week_start_da
         bottom = [b + h for b, h in zip(bottom, heights)]
 
     ax.set_ylabel("")
-    ax.set_title("Timeline (bar chart)", loc="left", fontsize=15, pad=12)
     ax.grid(True, axis="both", linestyle="-", color="#d7d7d7", alpha=0.8)
     ax.set_axisbelow(True)
     for spine in ax.spines.values():

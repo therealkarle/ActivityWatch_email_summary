@@ -309,13 +309,17 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         )
 
         self.assertTrue(all(len(line.get_xdata()) == 3 for line in fig.axes[0].lines))
+        right_line_xs = [line.get_xdata()[1] for line in fig.axes[0].lines if line.get_xdata()[0] > 0]
+        left_line_xs = [line.get_xdata()[1] for line in fig.axes[0].lines if line.get_xdata()[0] < 0]
+        self.assertTrue(all(b >= a for a, b in zip(right_line_xs, right_line_xs[1:])))
+        self.assertTrue(all(b <= a for a, b in zip(left_line_xs, left_line_xs[1:])))
         outside_positions = [
             text.get_position()
             for text in fig.axes[0].texts
             if abs(text.get_position()[0]) > 1.4
         ]
         self.assertGreaterEqual(len(outside_positions), 7)
-        self.assertTrue(all(abs(x) <= 1.9 and abs(y) <= 1.28 for x, y in outside_positions))
+        self.assertTrue(all(abs(x) <= 1.88 and abs(y) <= 1.28 for x, y in outside_positions))
         for side in (-1, 1):
             ys = sorted(y for x, y in outside_positions if x * side > 0)
             if len(ys) < 2:

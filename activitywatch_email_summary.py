@@ -1200,16 +1200,17 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         -1: [item for item in outside_labels if item["side"] < 0],
     }
     band_ranges = {1: (-1.15, 1.15), -1: (-1.15, 1.15)}
-    elbow_xs = {1: 1.08, -1: -1.08}
     text_xs = {1: 1.7, -1: -1.7}
     for side, items in label_groups.items():
         if not items:
             continue
         positions = distribute_label_positions(items, *band_ranges[side])
         ordered = sorted(items, key=lambda item: (item["y_target"], item["angle"]))
-        for item, y in zip(ordered, positions):
+        count = len(ordered)
+        for idx, (item, y) in enumerate(zip(ordered, positions)):
             anchor_x, anchor_y = item["anchor"]
-            elbow_x = elbow_xs[side]
+            elbow_step = 0.08 if count <= 5 else 0.11
+            elbow_x = side * (1.03 + elbow_step * idx)
             ax.plot(
                 [anchor_x, elbow_x, text_xs[side]],
                 [anchor_y, y, y],
@@ -1222,7 +1223,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
                 text_xs[side],
                 y,
                 item["label"],
-                ha="right" if side > 0 else "left",
+                ha="left" if side > 0 else "right",
                 va="center",
                 fontsize=max(7.2, 9.8 - item["depth"] * 0.5),
                 color="#1f2937",
@@ -1232,7 +1233,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
     ax.set_aspect("equal")
     ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
 
-    ax.set_xlim(-1.9, 1.9)
+    ax.set_xlim(-1.88, 1.88)
     ax.set_ylim(-1.28, 1.28)
     ax.set_axis_off()
     fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.04)

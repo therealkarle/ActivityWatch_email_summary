@@ -1082,6 +1082,13 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         wrapped = textwrap.wrap(label, width=width, break_long_words=False, break_on_hyphens=False) or [label]
         return "\n".join(wrapped[:2])
 
+    outside_labels: list[dict[str, Any]] = []
+
+    def label_requires_outside(depth: int, angle_span: float) -> bool:
+        if depth >= 1:
+            return True
+        return angle_span < 28.0
+
     def draw_node(
         node: dict[str, Any],
         prefix: tuple[str, ...],
@@ -1126,8 +1133,8 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
             angle_span = theta2 - theta1
             label_radius = inner_hole + (depth + 0.5) * ring_width
             label_area = angle_span * ring_width
-            if label_area >= 0.16:
-                label = wrap_label(child_name, 14 if depth == 0 else 12)
+            label = wrap_label(child_name, 14 if depth == 0 else 12)
+            if label_area >= 0.16 and not label_requires_outside(depth, angle_span):
                 ax.text(
                     math.cos(angle) * label_radius,
                     math.sin(angle) * label_radius,
@@ -1139,18 +1146,96 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
                     color=text_color(wedge.get_facecolor()),
                     clip_on=True,
                 )
+            else:
+                side = 1 if math.cos(angle) >= 0 else -1
+                outside_labels.append(
+                    {
+                        "side": side,
+                        "angle": angle,
+                        "y_target": max(-1.15, min(1.15, math.sin(angle) * 1.08)),
+                        "anchor": (
+                            math.cos(angle) * (radius - ring_width * 0.03),
+                            math.sin(angle) * (radius - ring_width * 0.03),
+                        ),
+                        "label": label,
+                        "color": text_color(wedge.get_facecolor()),
+                        "depth": depth,
+                    }
+                )
 
             draw_node(child_node, child_path, theta1, child_span, depth + 1)
             current_angle += child_span
 
+    def distribute_label_positions(items: list[dict[str, Any]], low: float, high: float) -> list[float]:
+        if not items:
+            return []
+        ordered = sorted(items, key=lambda item: (item["y_target"], item["angle"]))
+        count = len(ordered)
+        if count == 1:
+            return [min(high, max(low, ordered[0]["y_target"]))]
+
+        min_gap = 0.17 if count <= 6 else 0.13
+        required_span = min_gap * (count - 1)
+        span = high - low
+        if required_span > span:
+            extra = (required_span - span) / 2.0
+            low -= extra
+            high += extra
+
+        positions = [ordered[0]["y_target"]]
+        for item in ordered[1:]:
+            positions.append(max(item["y_target"], positions[-1] + min_gap))
+
+        shift = 0.0
+        if positions[-1] > high:
+            shift = high - positions[-1]
+        if positions[0] + shift < low:
+            shift = low - positions[0]
+        positions = [y + shift for y in positions]
+        return positions
+
     draw_node(tree, tuple(), 90.0, 360.0, 0)
+    label_groups = {
+        1: [item for item in outside_labels if item["side"] > 0],
+        -1: [item for item in outside_labels if item["side"] < 0],
+    }
+    band_ranges = {1: (-1.15, 1.15), -1: (-1.15, 1.15)}
+    elbow_xs = {1: 1.08, -1: -1.08}
+    text_xs = {1: 1.7, -1: -1.7}
+    for side, items in label_groups.items():
+        if not items:
+            continue
+        positions = distribute_label_positions(items, *band_ranges[side])
+        ordered = sorted(items, key=lambda item: (item["y_target"], item["angle"]))
+        for item, y in zip(ordered, positions):
+            anchor_x, anchor_y = item["anchor"]
+            elbow_x = elbow_xs[side]
+            ax.plot(
+                [anchor_x, elbow_x, text_xs[side]],
+                [anchor_y, y, y],
+                color=item["color"],
+                lw=0.95,
+                solid_capstyle="round",
+                zorder=2,
+            )
+            ax.text(
+                text_xs[side],
+                y,
+                item["label"],
+                ha="right" if side > 0 else "left",
+                va="center",
+                fontsize=max(7.2, 9.8 - item["depth"] * 0.5),
+                color="#1f2937",
+                bbox=dict(boxstyle="round,pad=0.14", facecolor="white", edgecolor="none", alpha=0.9),
+            )
+
     ax.set_aspect("equal")
     ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
 
-    ax.set_xlim(-1.02, 1.02)
-    ax.set_ylim(-1.02, 1.02)
+    ax.set_xlim(-1.9, 1.9)
+    ax.set_ylim(-1.28, 1.28)
     ax.set_axis_off()
-    fig.subplots_adjust(left=0.03, right=0.97, top=0.92, bottom=0.05)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.04)
     return fig
 
 

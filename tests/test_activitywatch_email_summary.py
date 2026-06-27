@@ -295,6 +295,33 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         self.assertIn("Mail", label_texts)
         self.assertIn("Backend", label_texts)
 
+    def test_category_plot_spreads_outside_labels(self) -> None:
+        fig = aw.create_category_plot(
+            {
+                ("Work", "Small A"): 300.0,
+                ("Work", "Small B"): 300.0,
+                ("Work", "Small C"): 300.0,
+                ("Work", "Small D"): 300.0,
+                ("Work", "Small E"): 300.0,
+                ("Work", "Small F"): 300.0,
+                ("Work", "Small G"): 300.0,
+            }
+        )
+
+        self.assertTrue(all(len(line.get_xdata()) == 3 for line in fig.axes[0].lines))
+        outside_positions = [
+            text.get_position()
+            for text in fig.axes[0].texts
+            if abs(text.get_position()[0]) > 1.4
+        ]
+        self.assertGreaterEqual(len(outside_positions), 7)
+        self.assertTrue(all(abs(x) <= 1.9 and abs(y) <= 1.28 for x, y in outside_positions))
+        for side in (-1, 1):
+            ys = sorted(y for x, y in outside_positions if x * side > 0)
+            if len(ys) < 2:
+                continue
+            self.assertTrue(all((b - a) >= 0.10 for a, b in zip(ys, ys[1:])))
+
 
 if __name__ == "__main__":
     unittest.main()

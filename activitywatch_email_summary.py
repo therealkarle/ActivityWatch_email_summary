@@ -128,10 +128,10 @@ def main() -> int:
     try:
         config = load_config(CONFIG_FILE)
     except Exception as exc:
-        LOGGER.error("Fehler beim Laden der Konfiguration: %s", exc)
+        LOGGER.error("Error loading configuration: %s", exc)
         if not CONFIG_FILE.exists():
             LOGGER.error(
-                "Lege %s an, indem du %s kopierst und ausfüllst.",
+                "Create %s by copying %s and filling it in.",
                 CONFIG_FILE,
                 DEFAULT_CONFIG_EXAMPLE_FILE,
             )
@@ -146,7 +146,7 @@ def main() -> int:
     try:
         sent_log = load_sent_log(SENT_LOG_FILE)
     except Exception as exc:
-        LOGGER.error("Fehler beim Laden des lokalen Sent-Logs: %s", exc)
+        LOGGER.error("Error loading local sent log: %s", exc)
         return 1
 
     now = datetime.now(config.timezone)
@@ -155,7 +155,7 @@ def main() -> int:
         if sent_log_updated:
             save_sent_log_atomic(SENT_LOG_FILE, sent_log)
     except Exception as exc:
-        LOGGER.error("Fehler beim Initialisieren des Erststart-Cutoffs: %s", exc)
+        LOGGER.error("Error initializing first-run cutoff: %s", exc)
         return 1
 
     try:
@@ -219,22 +219,22 @@ def main() -> int:
                 try:
                     save_sent_log_atomic(SENT_LOG_FILE, sent_log)
                 except Exception as log_exc:
-                    LOGGER.error("Sent-Log konnte nach Fehler nicht geschrieben werden: %s", log_exc)
-                LOGGER.exception("Fehler bei %s %s: %s", period.timeframe, period.label, exc)
+                    LOGGER.error("Could not write sent log after error: %s", log_exc)
+                LOGGER.exception("Error while processing %s %s: %s", period.timeframe, period.label, exc)
                 continue
 
     if not processed_any:
-        LOGGER.info("Keine neuen Berichte zu versenden.")
+        LOGGER.info("No new reports to send.")
 
     return 0
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="ActivityWatch E-Mail Report Generator")
+    parser = argparse.ArgumentParser(description="ActivityWatch email report generator")
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Führt genau einen Lauf aus. Standardverhalten.",
+        help="Run exactly once. This is the default behavior.",
     )
     return parser.parse_args()
 
@@ -256,9 +256,7 @@ def load_config(path: Path) -> AppConfig:
 
     invalid_timeframes = [value for value in enabled_timeframes if value not in SUPPORTED_TIMEFRAMES]
     if invalid_timeframes:
-        raise ValueError(
-            f"Ungültige Timeframes: {invalid_timeframes}. Erlaubt sind: {sorted(SUPPORTED_TIMEFRAMES)}"
-        )
+        raise ValueError(f"Invalid timeframes: {invalid_timeframes}. Allowed: {sorted(SUPPORTED_TIMEFRAMES)}")
 
     top_items_limit = int(raw.get("top_items_limit", DEFAULT_TOP_ITEMS_LIMIT))
     if top_items_limit < 1:
@@ -275,7 +273,7 @@ def load_config(path: Path) -> AppConfig:
     try:
         tz = ZoneInfo(timezone_name)
     except Exception as exc:
-        raise ValueError(f"Ungültige Zeitzone: {timezone_name}") from exc
+        raise ValueError(f"Invalid timezone: {timezone_name}") from exc
 
     smtp_settings = parse_smtp_settings(raw.get("smtp_settings", {}))
 
@@ -532,7 +530,7 @@ def discover_buckets(api_base_url: str) -> BucketCatalog:
             afk_bucket_ids.append(bucket_id)
 
     if not window_bucket_ids:
-        raise RuntimeError("Kein ActivityWatch-Window-Bucket gefunden.")
+        raise RuntimeError("No ActivityWatch window bucket found.")
 
     return BucketCatalog(
         window_bucket_ids=tuple(sorted(window_bucket_ids)),
@@ -732,7 +730,7 @@ def fetch_canonical_window_events(
         events.sort(key=lambda item: item.start)
         return events
     except Exception as exc:
-        LOGGER.info("Canonical ActivityWatch-Kategorien nicht verfügbar, nutze Fallback: %s", exc)
+        LOGGER.info("Canonical ActivityWatch categories unavailable, falling back: %s", exc)
         return None
 
 
@@ -989,7 +987,7 @@ def top_n_items(values: dict[str, float], limit: int) -> list[tuple[str, float]]
 def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> Figure:
     fig, ax = plt.subplots(figsize=(7.0, max(2.6, 0.75 * max(1, len(items)) + 0.9)))
     if not items:
-        ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=12)
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=12)
         ax.set_axis_off()
         return fig
 
@@ -1056,7 +1054,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         gridspec_kw={"width_ratios": [1.15, 1.0]},
     )
     if not category_seconds:
-        ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=14)
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=14)
         ax.set_axis_off()
         legend_ax.set_axis_off()
         return fig
@@ -1126,7 +1124,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
 def create_timeline_plot(report: ReportData, top_items_limit: int, week_start_day: int = 0) -> Figure:
     fig, ax = plt.subplots(figsize=(7.4, 5.8))
     if not report.timeline_seconds:
-        ax.text(0.5, 0.5, "Keine Daten", ha="center", va="center", fontsize=12)
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=12)
         ax.set_axis_off()
         return fig
 
@@ -1166,7 +1164,7 @@ def create_timeline_plot(report: ReportData, top_items_limit: int, week_start_da
         bottom = [b + h for b, h in zip(bottom, heights)]
 
     ax.set_ylabel("")
-    ax.set_title("Timeline (barchart)", loc="left", fontsize=15, pad=12)
+    ax.set_title("Timeline (bar chart)", loc="left", fontsize=15, pad=12)
     ax.grid(True, axis="both", linestyle="-", color="#d7d7d7", alpha=0.8)
     ax.set_axisbelow(True)
     for spine in ax.spines.values():
@@ -1358,15 +1356,15 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
           <div class="header">
             <h1>ActivityWatch {escape_html(report.period.timeframe.title())} Report</h1>
             <div class="summary">
-              <div class="summary-item"><strong>Zeitraum:</strong> {escape_html(report.period.label)}</div>
-              <div class="summary-item"><strong>Gesamtzeit:</strong> {escape_html(total_time)}</div>
-              <div class="summary-item"><strong>Gefundene Events:</strong> {report.events_found}</div>
+              <div class="summary-item"><strong>Period:</strong> {escape_html(report.period.label)}</div>
+              <div class="summary-item"><strong>Total time:</strong> {escape_html(total_time)}</div>
+              <div class="summary-item"><strong>Events found:</strong> {report.events_found}</div>
             </div>
           </div>
 
           <div class="report-sections">
             <section class="card">
-              <h2>Kategorien</h2>
+              <h2>Categories</h2>
               {category_hierarchy_html}
             </section>
             <section class="card">
@@ -1374,7 +1372,7 @@ def build_html_email(config: AppConfig, report: ReportData, _images: list[tuple[
               <img src="cid:category" alt="Category Sunburst" />
             </section>
             <section class="card">
-              <h2>Timeline (barchart)</h2>
+              <h2>Timeline (bar chart)</h2>
               <img src="cid:timeline" alt="Timeline" />
             </section>
             <section class="card">
@@ -1410,7 +1408,7 @@ def build_bar_list_html(
 ) -> str:
     rows = top_n_items(values, limit)
     if not rows:
-        return "<p class='muted'>Keine Daten</p>"
+        return "<p class='muted'>No data</p>"
     total_seconds = sum(values.values()) or 1.0
     html_rows = ['<div class="plain-list">']
     for label, seconds in rows:
@@ -1419,7 +1417,7 @@ def build_bar_list_html(
         html_rows.append(
             f'<div class="plain-line">{escape_html(str(rendered_label))} - '
             f'{escape_html(format_duration_compact(seconds))} - '
-            f'<em>{percent:.1f}% gesamt</em></div>'
+            f'<em>{percent:.1f}% total</em></div>'
         )
     html_rows.append("</div>")
     return "".join(html_rows)
@@ -1427,7 +1425,7 @@ def build_bar_list_html(
 
 def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]) -> str:
     if not category_seconds:
-        return "<p class='muted'>Keine Daten</p>"
+        return "<p class='muted'>No data</p>"
 
     tree: dict[str, Any] = {}
     totals: dict[tuple[str, ...], float] = defaultdict(float)
@@ -1458,7 +1456,7 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
                 '<div class="category-entry">'
                 f'<div class="category-line" style="padding-left: {len(prefix) * 16}px;">'
                 f'{escape_html(name)} - {escape_html(format_duration_compact(seconds))} - '
-                f'<em>{percent_total:.1f}% gesamt - {percent_parent:.1f}% oberkategorie</em>'
+                f'<em>{percent_total:.1f}% total - {percent_parent:.1f}% of parent category</em>'
                 "</div>"
                 f"{child_html}"
                 "</div>"
@@ -1473,7 +1471,7 @@ def build_category_hierarchy_html(category_seconds: dict[tuple[str, ...], float]
         html.append(
             '<div class="category-root">'
             f'<div class="category-line">{escape_html(root_name)} - {escape_html(format_duration_compact(root_seconds))} - '
-            f'<em>{root_total_percent:.1f}% gesamt</em></div>'
+            f'<em>{root_total_percent:.1f}% total</em></div>'
             "</div>"
         )
         if root_children:

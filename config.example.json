@@ -8,10 +8,10 @@
   "smtp_settings": {
     "server": "smtp.gmail.com",
     "port": 587,
-    "sender_email": "DEINE_ABSENDER_EMAIL",
-    "recipient_email": "DEINE_EMPFÄNGER_EMAIL",
-    "username": "DEIN_SMTP_BENUTZERNAME",
-    "password": "DEIN_APP_PASSWORT",
+    "sender_email": "YOUR_SENDER_EMAIL",
+    "recipient_email": "YOUR_RECIPIENT_EMAIL",
+    "username": "YOUR_SMTP_USERNAME",
+    "password": "YOUR_APP_PASSWORD",
     "use_tls": true,
     "use_ssl": false
   }

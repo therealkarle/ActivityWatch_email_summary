@@ -20,7 +20,7 @@ def main() -> int:
     try:
         config = aw.load_config(CONFIG_FILE)
     except Exception as exc:
-        aw.LOGGER.error("Fehler beim Laden der Konfiguration: %s", exc)
+        aw.LOGGER.error("Error loading configuration: %s", exc)
         return 1
 
     now = datetime.now(config.timezone)
@@ -40,10 +40,10 @@ def main() -> int:
         subject, html_body, inline_images = aw.render_email(config=config, report=report)
         aw.send_email(config.smtp_settings, subject, html_body, inline_images)
     except Exception as exc:
-        aw.LOGGER.exception("Fehler beim Senden des letzten abgeschlossenen Daily-Reports: %s", exc)
+        aw.LOGGER.exception("Error sending the most recent completed daily report: %s", exc)
         return 1
 
-    aw.LOGGER.info("Letzter abgeschlossener Daily-Report gesendet: %s", period.label)
+    aw.LOGGER.info("Last completed daily report sent: %s", period.label)
     return 0
 
 

@@ -246,10 +246,10 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
         self.assertIn("Work", html)
         self.assertNotIn("•", html)
         self.assertNotIn("⊞", html)
-        self.assertIn("Work - 1h 30m 0s - <em>75.0% gesamt</em>", html)
-        self.assertIn("Dev - 1h 0m 0s - <em>50.0% gesamt - 66.7% oberkategorie</em>", html)
-        self.assertIn("Mail - 30m 0s - <em>25.0% gesamt - 33.3% oberkategorie</em>", html)
-        self.assertIn("Comms - 30m 0s - <em>25.0% gesamt</em>", html)
+        self.assertIn("Work - 1h 30m 0s - <em>75.0% total</em>", html)
+        self.assertIn("Dev - 1h 0m 0s - <em>50.0% total - 66.7% of parent category</em>", html)
+        self.assertIn("Mail - 30m 0s - <em>25.0% total - 33.3% of parent category</em>", html)
+        self.assertIn("Comms - 30m 0s - <em>25.0% total</em>", html)
 
     def test_top_lists_use_plain_text_rows(self) -> None:
         html = aw.build_bar_list_html(
@@ -257,8 +257,8 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
             5,
         )
 
-        self.assertIn("ActivityWatch — Mozilla Firefox - 1h 0m 0s - <em>66.7% gesamt</em>", html)
-        self.assertIn("Chrono Analyzer - 30m 0s - <em>33.3% gesamt</em>", html)
+        self.assertIn("ActivityWatch — Mozilla Firefox - 1h 0m 0s - <em>66.7% total</em>", html)
+        self.assertIn("Chrono Analyzer - 30m 0s - <em>33.3% total</em>", html)
         self.assertNotIn("metric-item", html)
         self.assertNotIn("metric-percent", html)
 
@@ -268,9 +268,9 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
 
         self.assertIn("report-sections", html)
         self.assertIn("summary-item", html)
-        self.assertLess(html.index("Kategorien"), html.index("Category Sunburst"))
-        self.assertLess(html.index("Category Sunburst"), html.index("Timeline (barchart)"))
-        self.assertLess(html.index("Timeline (barchart)"), html.index("Top Window Titles"))
+        self.assertLess(html.index("Categories"), html.index("Category Sunburst"))
+        self.assertLess(html.index("Category Sunburst"), html.index("Timeline (bar chart)"))
+        self.assertLess(html.index("Timeline (bar chart)"), html.index("Top Window Titles"))
         self.assertLess(html.index("Top Window Titles"), html.index("Top Applications"))
         self.assertNotIn("cid:top-apps", html)
         self.assertNotIn("cid:top-titles", html)

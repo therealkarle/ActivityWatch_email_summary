@@ -309,23 +309,37 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
             }
         )
 
-        self.assertTrue(all(len(line.get_xdata()) == 2 for line in fig.axes[0].lines))
-        self.assertTrue(all(abs(text.get_rotation()) < 1e-6 for text in fig.axes[0].texts if text.get_text()))
-        outside_positions = [
-            text.get_position()
+        self.assertEqual(len(fig.axes[0].lines), 7)
+
+        outside_texts = [
+            text
             for text in fig.axes[0].texts
             if math.hypot(*text.get_position()) > 1.1
         ]
-        self.assertGreaterEqual(len(outside_positions), 7)
-        radii = [math.hypot(x, y) for x, y in outside_positions]
-        self.assertTrue(all(1.18 <= radius <= 1.34 for radius in radii))
-        for side in (-1, 1):
-            angles = sorted(
-                math.atan2(y, x) for x, y in outside_positions if x * side > 0
-            )
-            if len(angles) < 2:
-                continue
-            self.assertTrue(all((b - a) >= math.radians(4.0) for a, b in zip(angles, angles[1:])))
+        self.assertEqual(len(outside_texts), 7)
+
+        radii = [math.hypot(*text.get_position()) for text in outside_texts]
+        self.assertTrue(all(math.isclose(radius, 1.28, abs_tol=0.03) for radius in radii))
+
+        for text in outside_texts:
+            x, y = text.get_position()
+            theta = math.atan2(y, x)
+            if math.cos(theta) > 0:
+                self.assertEqual(text.get_ha(), "left")
+            elif math.cos(theta) < 0:
+                self.assertEqual(text.get_ha(), "right")
+            if math.sin(theta) > 0.35:
+                self.assertEqual(text.get_va(), "bottom")
+            elif math.sin(theta) < -0.35:
+                self.assertEqual(text.get_va(), "top")
+
+        for line in fig.axes[0].lines:
+            xdata = list(line.get_xdata())
+            ydata = list(line.get_ydata())
+            self.assertEqual(len(xdata), 2)
+            self.assertEqual(len(ydata), 2)
+            self.assertTrue(math.isclose(math.atan2(ydata[0], xdata[0]), math.atan2(ydata[1], xdata[1]), abs_tol=1e-6))
+            self.assertTrue(math.isclose(math.hypot(xdata[1], ydata[1]), 1.28, abs_tol=0.03))
 
 
 if __name__ == "__main__":

@@ -1129,15 +1129,15 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
             )
             ax.add_patch(wedge)
 
-            angle = math.radians((theta1 + theta2) / 2.0)
+            theta = math.radians((theta1 + theta2) / 2.0)
             angle_span = theta2 - theta1
             label_radius = inner_hole + (depth + 0.5) * ring_width
             label_area = angle_span * ring_width
             label = wrap_label(child_name, 14 if depth == 0 else 12)
             if label_area >= 0.16 and not label_requires_outside(depth, angle_span):
                 ax.text(
-                    math.cos(angle) * label_radius,
-                    math.sin(angle) * label_radius,
+                    math.cos(theta) * label_radius,
+                    math.sin(theta) * label_radius,
                     label,
                     ha="center",
                     va="center",
@@ -1147,80 +1147,84 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
                     clip_on=True,
                 )
             else:
-                side = 1 if math.cos(angle) >= 0 else -1
+                side = 1 if math.cos(theta) >= 0 else -1
+                longest_line = max((len(part) for part in label.split("\n")), default=len(label))
                 outside_labels.append(
                     {
                         "side": side,
-                        "angle": angle,
-                        "y_target": max(-1.15, min(1.15, math.sin(angle) * 1.08)),
-                        "anchor": (
-                            math.cos(angle) * (radius - ring_width * 0.03),
-                            math.sin(angle) * (radius - ring_width * 0.03),
-                        ),
+                        "theta": theta,
+                        "anchor_radius": radius,
                         "label": label,
-                        "color": text_color(wedge.get_facecolor()),
+                        "line_color": text_color(wedge.get_facecolor()),
                         "depth": depth,
+                        "min_gap": max(math.radians(4.0), 0.011 * longest_line),
                     }
                 )
 
             draw_node(child_node, child_path, theta1, child_span, depth + 1)
             current_angle += child_span
 
-    def distribute_label_positions(items: list[dict[str, Any]], low: float, high: float) -> list[float]:
-        if not items:
-            return []
-        ordered = sorted(items, key=lambda item: (item["y_target"], item["angle"]))
-        count = len(ordered)
-        if count == 1:
-            return [min(high, max(low, ordered[0]["y_target"]))]
-
-        min_gap = 0.17 if count <= 6 else 0.13
-        required_span = min_gap * (count - 1)
-        span = high - low
-        if required_span > span:
-            extra = (required_span - span) / 2.0
-            low -= extra
-            high += extra
-
-        positions = [ordered[0]["y_target"]]
-        for item in ordered[1:]:
-            positions.append(max(item["y_target"], positions[-1] + min_gap))
-
-        shift = 0.0
-        if positions[-1] > high:
-            shift = high - positions[-1]
-        if positions[0] + shift < low:
-            shift = low - positions[0]
-        positions = [y + shift for y in positions]
-        return positions
-
     def distribute_label_angles(items: list[dict[str, Any]], low: float, high: float) -> list[float]:
         if not items:
             return []
-        ordered = sorted(items, key=lambda item: item["angle"])
+        ordered = sorted(items, key=lambda item: item["theta"])
         count = len(ordered)
+        positions = [item["theta"] for item in ordered]
+        min_gaps = [item["min_gap"] for item in ordered]
         if count == 1:
-            return [min(high, max(low, ordered[0]["angle"]))]
+            return [min(high, max(low, positions[0]))]
 
-        min_gap = math.radians(7.5 if count <= 6 else 5.5)
-        required_span = min_gap * (count - 1)
-        span = high - low
-        if required_span > span:
-            extra = (required_span - span) / 2.0
+        required_span = sum(min_gaps[1:]) if count > 1 else 0.0
+        available_span = high - low
+        if required_span > available_span:
+            extra = (required_span - available_span) / 2.0
             low -= extra
             high += extra
 
-        positions = [max(low, min(high, ordered[0]["angle"]))]
-        for item in ordered[1:]:
-            positions.append(max(item["angle"], positions[-1] + min_gap))
+        for _ in range(48):
+            moved = False
+            for idx in range(1, count):
+                gap = min_gaps[idx]
+                distance = positions[idx] - positions[idx - 1]
+                if distance < gap:
+                    shift = (gap - distance) / 2.0
+                    positions[idx - 1] -= shift
+                    positions[idx] += shift
+                    moved = True
 
-        shift = 0.0
-        if positions[-1] > high:
-            shift = high - positions[-1]
-        if positions[0] + shift < low:
-            shift = low - positions[0]
-        positions = [a + shift for a in positions]
+            if positions[0] < low:
+                shift = low - positions[0]
+                positions = [position + shift for position in positions]
+                moved = True
+            if positions[-1] > high:
+                shift = positions[-1] - high
+                positions = [position - shift for position in positions]
+                moved = True
+
+            if not moved:
+                break
+
+        for idx in range(1, count):
+            positions[idx] = max(positions[idx], positions[idx - 1] + min_gaps[idx])
+
         return positions
+
+    def alignment_for_theta(theta: float) -> tuple[str, str]:
+        cos_theta = math.cos(theta)
+        sin_theta = math.sin(theta)
+        if cos_theta > 0:
+            ha = "left"
+        elif cos_theta < 0:
+            ha = "right"
+        else:
+            ha = "center"
+        if sin_theta > 0.35:
+            va = "bottom"
+        elif sin_theta < -0.35:
+            va = "top"
+        else:
+            va = "center"
+        return ha, va
 
     draw_node(tree, tuple(), 90.0, 360.0, 0)
     label_groups = {
@@ -1231,22 +1235,24 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         1: (-math.radians(18.0), math.radians(78.0)),
         -1: (math.radians(102.0), math.radians(198.0)),
     }
-    label_radius = 1.26
+    label_radius = 1.28
     for side, items in label_groups.items():
         if not items:
             continue
         positions = distribute_label_angles(items, *angle_ranges[side])
-        ordered = sorted(items, key=lambda item: item["angle"])
+        ordered = sorted(items, key=lambda item: item["theta"])
         for item, angle_pos in zip(ordered, positions):
-            anchor_x, anchor_y = item["anchor"]
+            anchor_x = math.cos(angle_pos) * item["anchor_radius"]
+            anchor_y = math.sin(angle_pos) * item["anchor_radius"]
             label_x = math.cos(angle_pos) * label_radius
             label_y = math.sin(angle_pos) * label_radius
-            line_end_x = math.cos(angle_pos) * (label_radius - 0.03)
-            line_end_y = math.sin(angle_pos) * (label_radius - 0.03)
+            line_end_x = label_x
+            line_end_y = label_y
+            ha, va = alignment_for_theta(angle_pos)
             ax.plot(
                 [anchor_x, line_end_x],
                 [anchor_y, line_end_y],
-                color=item["color"],
+                color=item["line_color"],
                 lw=0.95,
                 solid_capstyle="round",
                 zorder=2,
@@ -1255,8 +1261,8 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
                 label_x,
                 label_y,
                 item["label"],
-                ha="left" if math.cos(angle_pos) >= 0 else "right",
-                va="center",
+                ha=ha,
+                va=va,
                 fontsize=max(7.2, 9.8 - item["depth"] * 0.5),
                 rotation=0,
                 color="#1f2937",

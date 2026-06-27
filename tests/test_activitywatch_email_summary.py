@@ -299,38 +299,42 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
     def test_category_plot_spreads_outside_labels(self) -> None:
         fig = aw.create_category_plot(
             {
-                ("Work", "Small A"): 300.0,
-                ("Work", "Small B"): 300.0,
-                ("Work", "Small C"): 300.0,
-                ("Work", "Small D"): 300.0,
-                ("Work", "Small E"): 300.0,
-                ("Work", "Small F"): 300.0,
-                ("Work", "Small G"): 300.0,
+                ("Work", f"Small {idx:02d}"): 300.0
+                for idx in range(1, 31)
             }
         )
 
-        self.assertEqual(len(fig.axes[0].lines), 7)
+        self.assertEqual(len(fig.axes[0].lines), 30)
 
         outside_texts = [
             text
             for text in fig.axes[0].texts
-            if math.hypot(*text.get_position()) > 1.1
+            if math.hypot(*text.get_position()) > 0.95
         ]
-        self.assertEqual(len(outside_texts), 7)
+        self.assertEqual(len(outside_texts), 30)
+
+        root_texts = [text for text in fig.axes[0].texts if text.get_text() == "Work"]
+        self.assertEqual(len(root_texts), 1)
+        self.assertLess(math.hypot(*root_texts[0].get_position()), 0.6)
+        self.assertEqual(root_texts[0].get_fontweight(), "bold")
 
         radii = [math.hypot(*text.get_position()) for text in outside_texts]
-        self.assertTrue(all(math.isclose(radius, 1.28, abs_tol=0.03) for radius in radii))
+        self.assertGreater(len({round(radius, 2) for radius in radii}), 1)
 
         for text in outside_texts:
             x, y = text.get_position()
             theta = math.atan2(y, x)
+            expected_rotation = (math.degrees(theta) + 360.0) % 360.0
+            if 90.0 <= expected_rotation <= 270.0:
+                expected_rotation = (expected_rotation + 180.0) % 360.0
+            self.assertTrue(math.isclose(text.get_rotation() % 360.0, expected_rotation, abs_tol=1e-6))
             if math.cos(theta) > 0:
                 self.assertEqual(text.get_ha(), "left")
             elif math.cos(theta) < 0:
                 self.assertEqual(text.get_ha(), "right")
-            if math.sin(theta) > 0.35:
+            if math.sin(theta) > 0.5:
                 self.assertEqual(text.get_va(), "bottom")
-            elif math.sin(theta) < -0.35:
+            elif math.sin(theta) < -0.5:
                 self.assertEqual(text.get_va(), "top")
 
         for line in fig.axes[0].lines:
@@ -339,7 +343,7 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
             self.assertEqual(len(xdata), 2)
             self.assertEqual(len(ydata), 2)
             self.assertTrue(math.isclose(math.atan2(ydata[0], xdata[0]), math.atan2(ydata[1], xdata[1]), abs_tol=1e-6))
-            self.assertTrue(math.isclose(math.hypot(xdata[1], ydata[1]), 1.28, abs_tol=0.03))
+            self.assertGreater(math.hypot(xdata[1], ydata[1]), math.hypot(xdata[0], ydata[0]))
 
 
 if __name__ == "__main__":

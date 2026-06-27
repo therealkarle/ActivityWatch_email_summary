@@ -1083,11 +1083,30 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         return "\n".join(wrapped[:2])
 
     outside_labels: list[dict[str, Any]] = []
+    max_label_radius = inner_hole + ring_width
+    dense_angle_threshold = math.radians(14.0)
+    stagger_step = max(0.09, ring_width * 0.55)
 
-    def label_requires_outside(depth: int, angle_span: float) -> bool:
-        if depth >= 1:
-            return True
-        return angle_span < 28.0
+    def polar_xy(theta: float, radius: float) -> tuple[float, float]:
+        return math.cos(theta) * radius, math.sin(theta) * radius
+
+    def rotated_label_angle(theta: float) -> float:
+        angle = math.degrees(theta)
+        if 90.0 <= angle <= 270.0:
+            angle += 180.0
+        return angle % 360.0
+
+    def alignment_for_theta(theta: float) -> tuple[str, str]:
+        cos_theta = math.cos(theta)
+        sin_theta = math.sin(theta)
+        ha = "left" if cos_theta >= 0 else "right"
+        if sin_theta > 0.5:
+            va = "bottom"
+        elif sin_theta < -0.5:
+            va = "top"
+        else:
+            va = "center"
+        return ha, va
 
     def draw_node(
         node: dict[str, Any],
@@ -1096,6 +1115,7 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         span: float,
         depth: int,
     ) -> None:
+        nonlocal max_label_radius
         if not node:
             return
         total = totals[prefix] if prefix else sum(totals[(child_name,)] for child_name in node.keys())
@@ -1130,30 +1150,31 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
             ax.add_patch(wedge)
 
             theta = math.radians((theta1 + theta2) / 2.0)
-            angle_span = theta2 - theta1
             label_radius = inner_hole + (depth + 0.5) * ring_width
-            label_area = angle_span * ring_width
             label = wrap_label(child_name, 14 if depth == 0 else 12)
-            if label_area >= 0.16 and not label_requires_outside(depth, angle_span):
+            if depth == 0:
                 ax.text(
-                    math.cos(theta) * label_radius,
-                    math.sin(theta) * label_radius,
+                    *polar_xy(theta, label_radius),
                     label,
                     ha="center",
                     va="center",
-                    fontsize=max(7.8, 10.2 - depth * 0.8),
-                    fontweight="bold" if depth == 0 else "normal",
+                    fontsize=12.0,
+                    fontweight="bold",
                     color=text_color(wedge.get_facecolor()),
                     clip_on=True,
                 )
             else:
                 side = 1 if math.cos(theta) >= 0 else -1
                 longest_line = max((len(part) for part in label.split("\n")), default=len(label))
+                base_radius = radius + 0.08 + depth * 0.03
+                max_label_radius = max(max_label_radius, base_radius)
                 outside_labels.append(
                     {
                         "side": side,
                         "theta": theta,
+                        "sort_theta": math.atan2(math.sin(theta), math.cos(theta)),
                         "anchor_radius": radius,
+                        "label_radius": base_radius,
                         "label": label,
                         "line_color": text_color(wedge.get_facecolor()),
                         "depth": depth,
@@ -1164,94 +1185,32 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
             draw_node(child_node, child_path, theta1, child_span, depth + 1)
             current_angle += child_span
 
-    def distribute_label_angles(items: list[dict[str, Any]], low: float, high: float) -> list[float]:
-        if not items:
-            return []
-        ordered = sorted(items, key=lambda item: item["theta"])
-        count = len(ordered)
-        positions = [item["theta"] for item in ordered]
-        min_gaps = [item["min_gap"] for item in ordered]
-        if count == 1:
-            return [min(high, max(low, positions[0]))]
-
-        required_span = sum(min_gaps[1:]) if count > 1 else 0.0
-        available_span = high - low
-        if required_span > available_span:
-            extra = (required_span - available_span) / 2.0
-            low -= extra
-            high += extra
-
-        for _ in range(48):
-            moved = False
-            for idx in range(1, count):
-                gap = min_gaps[idx]
-                distance = positions[idx] - positions[idx - 1]
-                if distance < gap:
-                    shift = (gap - distance) / 2.0
-                    positions[idx - 1] -= shift
-                    positions[idx] += shift
-                    moved = True
-
-            if positions[0] < low:
-                shift = low - positions[0]
-                positions = [position + shift for position in positions]
-                moved = True
-            if positions[-1] > high:
-                shift = positions[-1] - high
-                positions = [position - shift for position in positions]
-                moved = True
-
-            if not moved:
-                break
-
-        for idx in range(1, count):
-            positions[idx] = max(positions[idx], positions[idx - 1] + min_gaps[idx])
-
-        return positions
-
-    def alignment_for_theta(theta: float) -> tuple[str, str]:
-        cos_theta = math.cos(theta)
-        sin_theta = math.sin(theta)
-        if cos_theta > 0:
-            ha = "left"
-        elif cos_theta < 0:
-            ha = "right"
-        else:
-            ha = "center"
-        if sin_theta > 0.35:
-            va = "bottom"
-        elif sin_theta < -0.35:
-            va = "top"
-        else:
-            va = "center"
-        return ha, va
-
     draw_node(tree, tuple(), 90.0, 360.0, 0)
-    label_groups = {
-        1: [item for item in outside_labels if item["side"] > 0],
-        -1: [item for item in outside_labels if item["side"] < 0],
-    }
-    angle_ranges = {
-        1: (-math.radians(18.0), math.radians(78.0)),
-        -1: (math.radians(102.0), math.radians(198.0)),
-    }
-    label_radius = 1.28
-    for side, items in label_groups.items():
+    def sorted_label_key(item: dict[str, Any]) -> float:
+        raw = item["sort_theta"]
+        if item["side"] > 0:
+            return raw
+        return raw if raw >= 0 else raw + math.tau
+
+    def render_label_group(items: list[dict[str, Any]]) -> None:
         if not items:
-            continue
-        positions = distribute_label_angles(items, *angle_ranges[side])
-        ordered = sorted(items, key=lambda item: item["theta"])
-        for item, angle_pos in zip(ordered, positions):
-            anchor_x = math.cos(angle_pos) * item["anchor_radius"]
-            anchor_y = math.sin(angle_pos) * item["anchor_radius"]
-            label_x = math.cos(angle_pos) * label_radius
-            label_y = math.sin(angle_pos) * label_radius
-            line_end_x = label_x
-            line_end_y = label_y
-            ha, va = alignment_for_theta(angle_pos)
+            return
+        ordered = sorted(items, key=sorted_label_key)
+        level = 0
+        for idx, item in enumerate(ordered):
+            if idx > 0:
+                gap = sorted_label_key(item) - sorted_label_key(ordered[idx - 1])
+                if gap < dense_angle_threshold:
+                    level = 1 - level
+                else:
+                    level = 0
+            label_radius = item["label_radius"] + level * stagger_step
+            anchor_x, anchor_y = polar_xy(item["theta"], item["anchor_radius"])
+            label_x, label_y = polar_xy(item["theta"], label_radius)
+            ha, va = alignment_for_theta(item["theta"])
             ax.plot(
-                [anchor_x, line_end_x],
-                [anchor_y, line_end_y],
+                [anchor_x, label_x],
+                [anchor_y, label_y],
                 color=item["line_color"],
                 lw=0.95,
                 solid_capstyle="round",
@@ -1263,17 +1222,22 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
                 item["label"],
                 ha=ha,
                 va=va,
+                rotation=rotated_label_angle(item["theta"]),
+                rotation_mode="anchor",
                 fontsize=max(7.2, 9.8 - item["depth"] * 0.5),
-                rotation=0,
                 color="#1f2937",
                 bbox=dict(boxstyle="round,pad=0.14", facecolor="white", edgecolor="none", alpha=0.9),
             )
 
+    render_label_group([item for item in outside_labels if item["side"] > 0])
+    render_label_group([item for item in outside_labels if item["side"] < 0])
+
     ax.set_aspect("equal")
     ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
 
-    ax.set_xlim(-1.55, 1.55)
-    ax.set_ylim(-1.55, 1.55)
+    axis_limit = max(1.25, max_label_radius + stagger_step + 0.18)
+    ax.set_xlim(-axis_limit, axis_limit)
+    ax.set_ylim(-axis_limit, axis_limit)
     ax.set_axis_off()
     fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.04)
     return fig

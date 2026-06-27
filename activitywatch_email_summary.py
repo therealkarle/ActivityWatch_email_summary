@@ -1194,38 +1194,71 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
         positions = [y + shift for y in positions]
         return positions
 
+    def distribute_label_angles(items: list[dict[str, Any]], low: float, high: float) -> list[float]:
+        if not items:
+            return []
+        ordered = sorted(items, key=lambda item: item["angle"])
+        count = len(ordered)
+        if count == 1:
+            return [min(high, max(low, ordered[0]["angle"]))]
+
+        min_gap = math.radians(7.5 if count <= 6 else 5.5)
+        required_span = min_gap * (count - 1)
+        span = high - low
+        if required_span > span:
+            extra = (required_span - span) / 2.0
+            low -= extra
+            high += extra
+
+        positions = [max(low, min(high, ordered[0]["angle"]))]
+        for item in ordered[1:]:
+            positions.append(max(item["angle"], positions[-1] + min_gap))
+
+        shift = 0.0
+        if positions[-1] > high:
+            shift = high - positions[-1]
+        if positions[0] + shift < low:
+            shift = low - positions[0]
+        positions = [a + shift for a in positions]
+        return positions
+
     draw_node(tree, tuple(), 90.0, 360.0, 0)
     label_groups = {
         1: [item for item in outside_labels if item["side"] > 0],
         -1: [item for item in outside_labels if item["side"] < 0],
     }
-    band_ranges = {1: (-1.15, 1.15), -1: (-1.15, 1.15)}
-    text_xs = {1: 1.7, -1: -1.7}
+    angle_ranges = {
+        1: (-math.radians(18.0), math.radians(78.0)),
+        -1: (math.radians(102.0), math.radians(198.0)),
+    }
+    label_radius = 1.26
     for side, items in label_groups.items():
         if not items:
             continue
-        positions = distribute_label_positions(items, *band_ranges[side])
-        ordered = sorted(items, key=lambda item: (item["y_target"], item["angle"]))
-        count = len(ordered)
-        for idx, (item, y) in enumerate(zip(ordered, positions)):
+        positions = distribute_label_angles(items, *angle_ranges[side])
+        ordered = sorted(items, key=lambda item: item["angle"])
+        for item, angle_pos in zip(ordered, positions):
             anchor_x, anchor_y = item["anchor"]
-            elbow_step = 0.08 if count <= 5 else 0.11
-            elbow_x = side * (1.03 + elbow_step * idx)
+            label_x = math.cos(angle_pos) * label_radius
+            label_y = math.sin(angle_pos) * label_radius
+            line_end_x = math.cos(angle_pos) * (label_radius - 0.03)
+            line_end_y = math.sin(angle_pos) * (label_radius - 0.03)
             ax.plot(
-                [anchor_x, elbow_x, text_xs[side]],
-                [anchor_y, y, y],
+                [anchor_x, line_end_x],
+                [anchor_y, line_end_y],
                 color=item["color"],
                 lw=0.95,
                 solid_capstyle="round",
                 zorder=2,
             )
             ax.text(
-                text_xs[side],
-                y,
+                label_x,
+                label_y,
                 item["label"],
-                ha="left" if side > 0 else "right",
+                ha="left" if math.cos(angle_pos) >= 0 else "right",
                 va="center",
                 fontsize=max(7.2, 9.8 - item["depth"] * 0.5),
+                rotation=0,
                 color="#1f2937",
                 bbox=dict(boxstyle="round,pad=0.14", facecolor="white", edgecolor="none", alpha=0.9),
             )
@@ -1233,8 +1266,8 @@ def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figu
     ax.set_aspect("equal")
     ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
 
-    ax.set_xlim(-1.88, 1.88)
-    ax.set_ylim(-1.28, 1.28)
+    ax.set_xlim(-1.55, 1.55)
+    ax.set_ylim(-1.55, 1.55)
     ax.set_axis_off()
     fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.04)
     return fig

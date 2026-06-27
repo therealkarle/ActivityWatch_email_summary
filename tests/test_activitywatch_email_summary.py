@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import importlib.util
 import sys
 from datetime import datetime, timedelta
@@ -308,23 +309,23 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
             }
         )
 
-        self.assertTrue(all(len(line.get_xdata()) == 3 for line in fig.axes[0].lines))
-        right_line_xs = [line.get_xdata()[1] for line in fig.axes[0].lines if line.get_xdata()[0] > 0]
-        left_line_xs = [line.get_xdata()[1] for line in fig.axes[0].lines if line.get_xdata()[0] < 0]
-        self.assertTrue(all(b >= a for a, b in zip(right_line_xs, right_line_xs[1:])))
-        self.assertTrue(all(b <= a for a, b in zip(left_line_xs, left_line_xs[1:])))
+        self.assertTrue(all(len(line.get_xdata()) == 2 for line in fig.axes[0].lines))
+        self.assertTrue(all(abs(text.get_rotation()) < 1e-6 for text in fig.axes[0].texts if text.get_text()))
         outside_positions = [
             text.get_position()
             for text in fig.axes[0].texts
-            if abs(text.get_position()[0]) > 1.4
+            if math.hypot(*text.get_position()) > 1.1
         ]
         self.assertGreaterEqual(len(outside_positions), 7)
-        self.assertTrue(all(abs(x) <= 1.88 and abs(y) <= 1.28 for x, y in outside_positions))
+        radii = [math.hypot(x, y) for x, y in outside_positions]
+        self.assertTrue(all(1.18 <= radius <= 1.34 for radius in radii))
         for side in (-1, 1):
-            ys = sorted(y for x, y in outside_positions if x * side > 0)
-            if len(ys) < 2:
+            angles = sorted(
+                math.atan2(y, x) for x, y in outside_positions if x * side > 0
+            )
+            if len(angles) < 2:
                 continue
-            self.assertTrue(all((b - a) >= 0.10 for a, b in zip(ys, ys[1:])))
+            self.assertTrue(all((b - a) >= math.radians(4.0) for a, b in zip(angles, angles[1:])))
 
 
 if __name__ == "__main__":

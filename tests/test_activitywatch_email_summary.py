@@ -279,18 +279,21 @@ class ActivityWatchEmailSummaryTests(unittest.TestCase):
     def test_category_plot_uses_legend_for_labels(self) -> None:
         fig = aw.create_category_plot(
             {
-                ("Work", "Dev"): 3600.0,
+                ("Work", "Dev", "Backend"): 1800.0,
+                ("Work", "Dev", "Frontend"): 1800.0,
                 ("Work", "Mail"): 1800.0,
                 ("Comms", "Email"): 1800.0,
             }
         )
 
         self.assertEqual(len(fig.axes), 1)
+        self.assertEqual(len(fig.axes[0].patches), 7)
         label_texts = " ".join(text.get_text() for text in fig.axes[0].texts)
         self.assertIn("Work", label_texts)
         self.assertIn("Dev", label_texts)
         self.assertIn("Comms", label_texts)
-        self.assertIn("·", label_texts)
+        self.assertIn("Mail", label_texts)
+        self.assertIn("Backend", label_texts)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
+from matplotlib.patches import Wedge
 import matplotlib.pyplot as plt
 
 
@@ -1044,140 +1045,110 @@ def create_horizontal_bar_chart(items: list[tuple[str, float]], title: str) -> F
 
 
 def create_category_plot(category_seconds: dict[tuple[str, ...], float]) -> Figure:
-    leaf_items = sorted(category_seconds.items(), key=lambda item: item[1], reverse=True)
-    height = max(6.4, 4.8 + 0.28 * max(0, len(leaf_items) - 4))
+    max_depth = max((len(path) for path in category_seconds), default=1)
+    height = max(6.6, 5.3 + 0.45 * max(0, max_depth - 2))
     fig, ax = plt.subplots(figsize=(9.8, height))
     if not category_seconds:
         ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=14)
         ax.set_axis_off()
         return fig
 
-    inner_totals: dict[str, float] = defaultdict(float)
-    outer_sizes: list[float] = []
-    outer_colors: list[tuple[float, float, float, float]] = []
     palette = plt.get_cmap("tab20")
+    ring_width = 0.78 / max_depth
+    inner_hole = 1.0 - ring_width * max_depth
 
-    for index, (path, seconds) in enumerate(leaf_items):
-        outer_sizes.append(seconds)
-        outer_colors.append(palette(index % 20))
-        inner_totals[path[0]] += seconds
+    tree: dict[str, Any] = {}
+    totals: dict[tuple[str, ...], float] = defaultdict(float)
+    for path, seconds in category_seconds.items():
+        node = tree
+        for idx, segment in enumerate(path):
+            prefix = path[: idx + 1]
+            totals[prefix] += seconds
+            node = node.setdefault(segment, {})
 
-    inner_labels = list(inner_totals.keys())
-    inner_sizes = [inner_totals[label] for label in inner_labels]
-    inner_colors = [palette(i) for i in range(len(inner_labels))]
+    root_names = sorted(tree.keys(), key=lambda name: totals.get((name,), 0.0), reverse=True)
+    root_color_index = {name: idx for idx, name in enumerate(root_names)}
 
-    inner_wedges = ax.pie(
-        inner_sizes,
-        radius=1.0,
-        wedgeprops=dict(width=0.28, edgecolor="white", linewidth=1.2),
-        startangle=90,
-        colors=inner_colors,
-    )
-    outer_wedges = ax.pie(
-        outer_sizes,
-        radius=1.0 - 0.28,
-        wedgeprops=dict(width=0.28, edgecolor="white", linewidth=1.2),
-        startangle=90,
-        colors=outer_colors,
-    )
+    def node_color(path: tuple[str, ...]) -> tuple[float, float, float, float]:
+        root_index = root_color_index.get(path[0], 0)
+        return palette((root_index * 3 + len(path) - 1) % 20)
+
+    def text_color(rgba: tuple[float, float, float, float]) -> str:
+        r, g, b, _ = rgba
+        luminance = 0.299 * r + 0.587 * g + 0.114 * b
+        return "white" if luminance < 0.6 else "#1f2937"
+
+    def wrap_label(label: str, width: int) -> str:
+        wrapped = textwrap.wrap(label, width=width, break_long_words=False, break_on_hyphens=False) or [label]
+        return "\n".join(wrapped[:2])
+
+    def draw_node(
+        node: dict[str, Any],
+        prefix: tuple[str, ...],
+        start_angle: float,
+        span: float,
+        depth: int,
+    ) -> None:
+        if not node:
+            return
+        total = totals[prefix] if prefix else sum(totals[(child_name,)] for child_name in node.keys())
+        if total <= 0:
+            return
+
+        ordered_children = sorted(
+            node.items(),
+            key=lambda item: totals[prefix + (item[0],)],
+            reverse=True,
+        )
+        current_angle = start_angle
+        for child_name, child_node in ordered_children:
+            child_path = prefix + (child_name,)
+            child_total = totals[child_path]
+            if child_total <= 0:
+                continue
+            child_span = span * (child_total / total)
+            theta1 = current_angle
+            theta2 = current_angle + child_span
+            radius = inner_hole + (depth + 1) * ring_width
+            wedge = Wedge(
+                (0.0, 0.0),
+                radius,
+                theta1,
+                theta2,
+                width=ring_width,
+                facecolor=node_color(child_path),
+                edgecolor="white",
+                linewidth=1.2,
+            )
+            ax.add_patch(wedge)
+
+            angle = math.radians((theta1 + theta2) / 2.0)
+            angle_span = theta2 - theta1
+            label_radius = inner_hole + (depth + 0.5) * ring_width
+            label_area = angle_span * ring_width
+            if label_area >= 0.16:
+                label = wrap_label(child_name, 14 if depth == 0 else 12)
+                ax.text(
+                    math.cos(angle) * label_radius,
+                    math.sin(angle) * label_radius,
+                    label,
+                    ha="center",
+                    va="center",
+                    fontsize=max(7.8, 10.2 - depth * 0.8),
+                    fontweight="bold" if depth == 0 else "normal",
+                    color=text_color(wedge.get_facecolor()),
+                    clip_on=True,
+                )
+
+            draw_node(child_node, child_path, theta1, child_span, depth + 1)
+            current_angle += child_span
+
+    draw_node(tree, tuple(), 90.0, 360.0, 0)
     ax.set_aspect("equal")
     ax.set_title("Category Sunburst", loc="left", fontsize=15, pad=12)
 
-    for label, wedge, color in zip(inner_labels, inner_wedges[0], inner_colors):
-        angle = math.radians((wedge.theta1 + wedge.theta2) / 2.0)
-        radius = 0.87
-        x = math.cos(angle) * radius
-        y = math.sin(angle) * radius
-        display_label = "\n".join(
-            textwrap.wrap(label, width=14, break_long_words=False, break_on_hyphens=False)[:2]
-        )
-        ax.text(
-            x,
-            y,
-            display_label,
-            ha="center",
-            va="center",
-            fontsize=10.0,
-            fontweight="bold",
-            color="white",
-            bbox=dict(boxstyle="round,pad=0.18", facecolor=color, edgecolor="none", alpha=0.82),
-        )
-
-    total_seconds = sum(category_seconds.values()) or 1.0
-    label_items: list[dict[str, Any]] = []
-    for (path, seconds), wedge, color in zip(leaf_items, outer_wedges[0], outer_colors):
-        percent = seconds / total_seconds * 100
-        label = " > ".join(path)
-        wrapped = textwrap.wrap(label, width=24, break_long_words=False, break_on_hyphens=False) or [label]
-        display_label = "\n".join(wrapped[:2])
-        if len(wrapped) > 2:
-            display_label = f"{display_label}\n..."
-        angle = math.radians((wedge.theta1 + wedge.theta2) / 2.0)
-        x = math.cos(angle)
-        y = math.sin(angle)
-        label_items.append(
-            {
-                "color": color,
-                "display_label": display_label,
-                "duration": format_duration_compact(seconds),
-                "percent": percent,
-                "side": 1 if x >= 0 else -1,
-                "target_y": y * 1.15,
-                "anchor": (x * 0.98, y * 0.98),
-            }
-        )
-
-    def spread_labels(items: list[dict[str, Any]]) -> list[float]:
-        if not items:
-            return []
-        items = sorted(items, key=lambda item: item["target_y"])
-        top = 1.25
-        bottom = -1.25
-        min_gap = 0.19 if len(items) <= 8 else 0.14
-        positions = [max(bottom, min(top, item["target_y"])) for item in items]
-        for idx in range(1, len(positions)):
-            positions[idx] = max(positions[idx], positions[idx - 1] + min_gap)
-        if positions[-1] > top:
-            shift = positions[-1] - top
-            positions = [pos - shift for pos in positions]
-        for idx in range(len(positions) - 2, -1, -1):
-            positions[idx] = min(positions[idx], positions[idx + 1] - min_gap)
-        if positions[0] < bottom:
-            shift = bottom - positions[0]
-            positions = [pos + shift for pos in positions]
-        return positions
-
-    left_items = [item for item in label_items if item["side"] < 0]
-    right_items = [item for item in label_items if item["side"] >= 0]
-    left_positions = spread_labels(left_items)
-    right_positions = spread_labels(right_items)
-
-    for items, positions, side in ((left_items, left_positions, -1), (right_items, right_positions, 1)):
-        for item, y in zip(sorted(items, key=lambda value: value["target_y"]), positions):
-            anchor_x, anchor_y = item["anchor"]
-            elbow_x = side * 1.16
-            text_x = side * 1.30
-            line_end_x = side * 1.26
-            ax.plot(
-                [anchor_x, elbow_x, line_end_x],
-                [anchor_y, y, y],
-                color=item["color"],
-                lw=1.05,
-                solid_capstyle="round",
-            )
-            ax.text(
-                text_x,
-                y,
-                f'{item["display_label"]}\n{item["duration"]} · {item["percent"]:.1f}%',
-                ha="left" if side > 0 else "right",
-                va="center",
-                fontsize=8.7,
-                color="#1f2937",
-                bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="none", alpha=0.86),
-            )
-
-    ax.set_xlim(-1.55, 1.55)
-    ax.set_ylim(-1.38, 1.38)
+    ax.set_xlim(-1.02, 1.02)
+    ax.set_ylim(-1.02, 1.02)
     ax.set_axis_off()
     fig.subplots_adjust(left=0.03, right=0.97, top=0.92, bottom=0.05)
     return fig

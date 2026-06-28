@@ -143,8 +143,6 @@ def main() -> int:
         # Default behaviour: one boot-time run. The flag exists mainly for testability.
         pass
 
-    time_module.sleep(15)
-
     try:
         sent_log = load_sent_log(SENT_LOG_FILE)
     except Exception as exc:

@@ -1,6 +1,10 @@
 # ActivityWatch Email Summary
 
-ActivityWatch Email Summary is an automatic time tracking report tool that turns local ActivityWatch data into scheduled SMTP email reports. It creates readable daily, weekly, monthly, and yearly ActivityWatch reports with category breakdowns, charts, top applications, top window titles, and a timeline view.
+## Intro
+
+I wanted a script that sends me an email summary of my computer activity, so I built this.
+
+ActivityWatch Email Summary turns local ActivityWatch data into automatic SMTP email reports. It creates readable daily, weekly, monthly, and yearly summaries with category breakdowns, charts, top applications, top window titles, and a timeline view.
 
 It is designed for:
 - people who want a personal productivity report from ActivityWatch
@@ -8,23 +12,34 @@ It is designed for:
 - GitHub repositories that need clear setup instructions
 - AI agents and automation tools that need a concise, machine-friendly project summary
 
-## Quick Facts
+## Main Features
 
-- Input: ActivityWatch window events from a local ActivityWatch instance
-- Output: HTML email with plain-text fallback and inline PNG charts
-- Reports: daily, weekly, monthly, yearly
-- Delivery: SMTP with TLS or SSL
-- Safety: duplicate-send protection via a local sent log
-- Runtime files: stored in `.aw_email_summary/`
-- Main script: `activitywatch_email_summary.py`
-- One-off helper: `tests/send_today_daily_report.py`
+- Automatic email reports for your ActivityWatch data.
+- Daily, weekly, monthly, and yearly summaries.
+- Clear category breakdowns with percentages.
+- Top applications and top window titles.
+- Visual charts directly inside the email.
+- Plain-text fallback for email clients that do not render HTML well.
+- Automatic duplicate-send protection so you do not get the same report twice.
+
+## Quickstart Guide
+
+1. Clone the repository.
+2. Copy `config.example.json` to `config.json`.
+3. Fill in your SMTP and ActivityWatch settings.
+4. If you want automatic sending after Windows login, set up the autostart files:
+
+```text
+autostart_aw_send_email.vbs -> autostart_aw_send_email.bat -> activitywatch_email_summary.py
+```
 
 ## Table of Contents
 
-- [Features](#features)
-- [Repository Contents](#repository-contents)
-- [Requirements](#requirements)
-- [Installation](#installation)
+- [Intro](#intro)
+- [Main Features](#main-features)
+- [Quickstart Guide](#quickstart-guide)
+- [All Features Explained](#all-features-explained)
+- [Extensive Installation Guide](#extensive-installation-guide)
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Windows Autostart](#windows-autostart)
@@ -33,70 +48,128 @@ It is designed for:
 - [Troubleshooting](#troubleshooting)
 - [Security and Privacy](#security-and-privacy)
 
-## Features
+## All Features Explained
 
-- Reads activity data from the local ActivityWatch API.
-- Discovers ActivityWatch window buckets automatically.
-- Uses canonical ActivityWatch categories when available.
-- Falls back to raw window-event data when canonical categories are unavailable.
-- Supports `daily`, `weekly`, `monthly`, and `yearly` reporting.
-- Builds a category hierarchy view with percentages.
-- Generates a category sunburst chart.
-- Generates a timeline bar chart.
-- Shows top applications and top window titles.
-- Sends a multipart email with:
-  - plain-text body
-  - HTML body
-  - inline PNG charts
-- Avoids duplicate sends by storing report state in a local sent log.
-- Writes logs to a local runtime directory.
-- Includes Windows startup scripts for boot-time or logon execution.
-- Includes a helper script for sending the most recent completed daily report.
+### ActivityWatch Data Source
 
-## Repository Contents
+The script reads data from a local ActivityWatch instance through the HTTP API. It automatically discovers window buckets and AFK buckets, then uses them to calculate how much time was spent in each app, title, and category.
 
-- `activitywatch_email_summary.py` - main application script
-- `tests/send_today_daily_report.py` - helper that sends the last completed daily report
-- `tests/test_activitywatch_email_summary.py` - unit tests
-- `config.example.json` - sample configuration file
-- `autostart_aw_send_email.bat` - Windows batch launcher
-- `autostart_aw_send_email.vbs` - hidden-window launcher for Windows autostart
-- `BSPs/EmailLayout1.docx` - bundled document asset
-- `.gitignore` - ignores local config, runtime data, and generated files
+### Category Handling
 
-## Requirements
+If canonical ActivityWatch categories are available, the script uses them. If not, it falls back to raw window-event data and assigns uncategorized activity to `Uncategorized`.
 
-- Python 3.10 or newer
-- A local ActivityWatch instance
-- An SMTP account and credentials that can send email
-- `matplotlib` for chart generation
+### Report Timeframes
 
-The code talks directly to the ActivityWatch HTTP API. It does not require a separate Python ActivityWatch client library.
+The tool supports four report windows:
+- daily
+- weekly
+- monthly
+- yearly
 
-## Installation
+It can generate any enabled timeframe from the configuration file and remembers what has already been sent so it does not resend the same period twice.
 
-1. Clone the repository.
-2. Create and activate a virtual environment:
+### Email Output
+
+Each report is sent as a multipart email with:
+- a plain-text version for compatibility
+- an HTML version for readability
+- inline PNG charts so the report is visible directly in email clients
+
+### Charts and Visuals
+
+The report contains:
+- a category hierarchy summary
+- a category sunburst chart
+- a timeline bar chart
+- top applications
+- top window titles
+
+### Duplicate-Send Protection
+
+The application writes a local sent log in `.aw_email_summary/`. This tracks which periods are already completed and prevents duplicate emails after restarts.
+
+### Logging
+
+Operational logs are written to `.aw_email_summary/activitywatch_email_summary.log`. This helps with SMTP problems, API availability issues, and empty-report debugging.
+
+### Windows Startup Support
+
+Two helper files are included:
+- `autostart_aw_send_email.bat`
+- `autostart_aw_send_email.vbs`
+
+Together they support a hidden, delayed autostart workflow on Windows.
+
+### One-Off Daily Helper
+
+`tests/send_today_daily_report.py` sends the most recent completed daily report directly. This is useful when you want to manually trigger only the last finished day.
+
+## Extensive Installation Guide
+
+### 1. Install Python
+
+Use Python 3.10 or newer. Confirm it is available:
+
+```powershell
+python --version
+```
+
+### 2. Clone the Repository
+
+```powershell
+git clone https://github.com/<your-user>/<your-repo>.git
+cd <your-repo>
+```
+
+### 3. Create a Virtual Environment
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-3. Install the runtime dependency:
+If PowerShell blocks script execution, enable it for your user or use the CMD activation script instead:
+
+```powershell
+.venv\Scripts\activate.bat
+```
+
+### 4. Install Dependencies
+
+Install the runtime dependency:
 
 ```powershell
 python -m pip install matplotlib
 ```
 
-4. For test execution, no extra package is required because the tests use the Python standard library `unittest`.
-5. Copy the example configuration:
+The project currently relies on the Python standard library plus `matplotlib`. No extra test framework is required for the included unit tests.
+
+### 5. Create the Local Configuration
+
+Copy the example configuration:
 
 ```powershell
 Copy-Item config.example.json config.json
 ```
 
-6. Edit `config.json` and fill in your real SMTP and ActivityWatch settings.
+Then edit `config.json` and provide:
+- ActivityWatch API URL
+- timezone
+- SMTP server details
+- sender and recipient email addresses
+- username and password or app password
+
+### 6. Verify ActivityWatch
+
+Make sure the local ActivityWatch app is running and recording window activity before you launch the report script.
+
+### 7. Run the Program
+
+Start the main script from the repository root:
+
+```powershell
+python activitywatch_email_summary.py
+```
 
 ## Configuration
 
